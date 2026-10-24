@@ -33,13 +33,17 @@ const server = http.createServer(async (req, res) => {
     if (RELAY) {
       const ticket = crypto.randomBytes(16).toString('hex');
       tickets.set(ticket, { target, exp: Date.now() + 120_000 });
+      console.log(`[session] relay target=${target} from=${req.socket.remoteAddress}`);
       return json(res, 200, { mode: 'relay', url: `ws://${req.headers.host}/relay?ticket=${ticket}`, token: ticket, expiresAt: Math.floor(Date.now() / 1000) + 120 });
     }
     try {
       const s = await createClientSecret(API_KEY, target);
+      console.log(`[session] direct target=${target} from=${req.socket.remoteAddress} ok`);
       return json(res, 200, { mode: 'direct', url: TRANSLATE_WS_URL, token: s.value, expiresAt: s.expiresAt });
     } catch (e) {
-      return json(res, 502, { error: e.message });
+      // Log only the status and error code, never the key or the raw message.
+      console.log(`[session] direct target=${target} failed status=${e.status} code=${e.code}`);
+      return json(res, 502, { error: e.code || `upstream ${e.status}` });
     }
   }
   json(res, 404, { error: 'not found' });

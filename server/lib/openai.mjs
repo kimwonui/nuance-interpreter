@@ -35,6 +35,7 @@ export async function createClientSecret(apiKey, target, ttlSeconds = 300) {
     const message = body?.error?.message || `OpenAI ${res.status}`;
     const err = new Error(message);
     err.status = res.status;
+    err.code = body?.error?.code || body?.error?.type || null;
     throw err;
   }
   return { value: body.value, expiresAt: body.expires_at, sessionId: body.session?.id };
