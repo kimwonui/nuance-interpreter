@@ -96,6 +96,14 @@ struct OrbHomeView: View {
             .padding(.horizontal, 14).padding(.vertical, 8)
             .background(Theme.badge, in: Capsule())
             .accessibilityHint(err)
+            // Show the actual reason (timeout, unauthorized, …) so a failed connection can be diagnosed on the phone.
+            Text(err)
+                .font(.noto(11, .regular))
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+                .padding(.top, 6)
         }
     }
 

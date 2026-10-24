@@ -64,7 +64,7 @@ npm run dev:relay            # fallback if direct WebSocket auth is rejected: iP
 npm run eval                 # quality + latency on the test sentences (results in server/eval-out/)
 ```
 
-For deployment, put `server/api/session.mjs` on Vercel with `OPENAI_API_KEY` (required) and `APP_SHARED_SECRET` (optional).
+Production token server: `https://nua-token.vercel.app` (Vercel project `nua-token`, functions `api/session` and `api/metrics`). Env vars: `OPENAI_API_KEY` and `APP_SHARED_SECRET` (both required, server-only). GitHub auto-deploy is disconnected; deploys are manual and owner-approved.
 
 ## Install on an iPhone (development)
 

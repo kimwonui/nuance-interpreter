@@ -19,6 +19,8 @@ const tickets = new Map(); // 중계 모드 1회용 입장권 → { target, exp 
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
+  // Access log: method, path, status, client address. No headers or bodies.
+  res.on('finish', () => console.log(`[http] ${req.method} ${url.pathname} ${res.statusCode} from=${req.socket.remoteAddress} key=${req.headers['x-app-key'] ? 'sent' : 'none'}`));
   if (req.method === 'GET' && url.pathname === '/health') {
     return json(res, 200, { ok: true, mode: RELAY ? 'relay' : 'direct', hasKey: Boolean(API_KEY) });
   }
