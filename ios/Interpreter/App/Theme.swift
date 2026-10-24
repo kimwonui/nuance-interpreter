@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 /// 길로그 컬러스펙 v1.1 · 타이포 · 모서리 값을 그대로 옮긴 토큰.
-/// 피그마 "뉘앙스 통역 (가제)" 파일의 로컬 변수와 1:1.
+/// 피그마 NUA 파일의 로컬 변수와 1:1.
 enum Theme {
     static let text = dyn(0x26262B, 0xF3F3F6)
     static let textSecondary = dyn(0x71717A, 0xA0A0AA)

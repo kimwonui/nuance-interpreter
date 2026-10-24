@@ -14,7 +14,7 @@ struct OnboardingView: View {
                 .frame(width: 88, height: 88)
                 .background(Theme.gradient(scheme), in: RoundedRectangle(cornerRadius: 28))
                 .shadow(color: .black.opacity(0.14), radius: 18, y: 6)
-            Text("말투까지 옮기는\n대화 통역").font(.noto(28, .bold)).foregroundStyle(Theme.text)
+            Text("NUA 누아\n말투까지 옮기는 통역").font(.noto(28, .bold)).foregroundStyle(Theme.text)
             Text("한국어와 영어로 마주 보고 대화하세요.\n말한 사람의 의도와 감정을 최대한 살려\n상대 언어 음성으로 들려드려요.")
                 .font(.noto(15, .medium))
                 .foregroundStyle(Theme.textSecondary)

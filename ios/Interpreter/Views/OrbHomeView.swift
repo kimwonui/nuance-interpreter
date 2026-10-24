@@ -18,6 +18,11 @@ struct OrbHomeView: View {
                     .background(Theme.badge, in: Capsule())
             }
             Spacer(minLength: 0)
+            Text("NUA")
+                .font(.noto(15, .bold))
+                .tracking(3.6)
+                .foregroundStyle(Theme.accentText)
+                .accessibilityLabel("누아")
             OrbView(mode: orbMode, inputLevel: controller.level, outputLevel: controller.outputLevel, accessibilityText: "\(status.title). \(status.sub)")
                 .onTapGesture { if controller.phase == .playing { controller.stopPlayback() } }
             VStack(spacing: 4) {

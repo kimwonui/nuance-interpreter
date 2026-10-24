@@ -1,9 +1,9 @@
-# 뉘앙스 통역 (가제)
+# NUA (누아)
 
 아이폰 한 대로 한국어 ↔ 영어 대화를 실시간 음성 통역하는 iOS 앱. 말한 사람의 의도·감정·말투를 최대한 살려 상대 언어 음성으로 들려준다.
-이름·번들 ID는 아직 정하지 않았다(지금은 `com.wonuik.interpreter.dev`). 길로그 정식 제품이 아니다.
+이름은 **NUA(누아)** — Nuance(뉘앙스)의 앞 Nua. HackPSU 출품작이며 길로그 정식 제품이 아니다. 앱 식별자는 그대로 `com.wonuik.interpreter.dev`.
 
-- 디자인: 피그마 [뉘앙스 통역 (가제) — iOS UI/UX](https://www.figma.com/design/aNByF25oUVjYOFZn7o3i3B) (라이트 9 + 다크 9, 길로그 컬러스펙 v1.1 토큰 복제)
+- 디자인: 피그마 [NUA](https://www.figma.com/design/aNByF25oUVjYOFZn7o3i3B) — 라이트 화면 기준(다크 프레임은 보존만, 2026-10-24부터 신규·수정 안 함), 길로그 컬러스펙 v1.1 토큰 복제
 - 통역 엔진: OpenAI `gpt-realtime-translate` (통역 전용 실시간 음성→음성, 분당 $0.034, 2026-10-24 공식 문서 기준)
 
 ## 구조

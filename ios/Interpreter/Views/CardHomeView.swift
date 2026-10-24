@@ -29,7 +29,7 @@ struct CardHomeView: View {
 
     private var header: some View {
         HStack {
-            Text("대화 통역").font(.noto(24, .bold)).foregroundStyle(Theme.text)
+            Text("NUA").font(.noto(24, .bold)).foregroundStyle(Theme.text)
             Spacer()
             Button { showSettings = true } label: {
                 Image(systemName: "slider.horizontal.3")
