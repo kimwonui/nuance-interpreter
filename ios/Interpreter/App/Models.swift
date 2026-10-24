@@ -8,15 +8,15 @@ enum Lang: String, CaseIterable, Identifiable, Codable {
     var code: String { rawValue.uppercased() }
     var name: String {
         switch self {
-        case .ko: return "한국어"
+        case .ko: return "Korean"
         case .en: return "English"
         }
     }
-    var speakTitle: String { self == .ko ? "한국어로 말하기" : "Speak English" }
-    var speakHint: String { self == .ko ? "탭하고 말하세요" : "Tap and speak" }
-    var listeningTitle: String { self == .ko ? "듣는 중… 끝나면 탭" : "Listening… tap to end" }
-    var cutInHint: String { self == .ko ? "탭하면 끊고 말하기" : "Tap to cut in" }
-    var waitingHint: String { self == .ko ? "상대가 말하는 중" : "Other side speaking" }
+    var speakTitle: String { "Speak \(name)" }
+    var speakHint: String { "Tap and speak" }
+    var listeningTitle: String { "Listening… tap to end" }
+    var cutInHint: String { "Tap to cut in" }
+    var waitingHint: String { "Other side speaking" }
 }
 
 enum TurnStatus: Equatable {

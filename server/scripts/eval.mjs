@@ -13,7 +13,7 @@ const args = Object.fromEntries(process.argv.slice(2).map((a) => a.replace(/^--/
 const here = path.dirname(new URL(import.meta.url).pathname);
 loadEnv(path.join(here, '..', '.env.local'));
 const API_KEY = process.env.OPENAI_API_KEY;
-if (!API_KEY) { console.error('OPENAI_API_KEY 없음 (server/.env.local)'); process.exit(1); }
+if (!API_KEY) { console.error('OPENAI_API_KEY missing (server/.env.local)'); process.exit(1); }
 
 const AUTH = args.auth || 'ek';
 const OUT = path.resolve(args.out || path.join(here, '..', 'eval-out'));
@@ -27,14 +27,14 @@ for (const c of cases) {
   const pcm = synth(c);
   const r = await runCase(c, pcm).catch((e) => ({ error: e.message }));
   results.push({ ...c, ...r });
-  console.log(`${c.id}\t${r.error ? '실패 ' + r.error : `끝→첫음성 ${fmt(r.endToFirstAudio)}  끝→완료 ${fmt(r.endToClosed)}`}\n  원문인식: ${r.inputText || ''}\n  번역: ${r.outputText || ''}`);
+  console.log(`${c.id}\t${r.error ? 'FAILED ' + r.error : `end→first audio ${fmt(r.endToFirstAudio)}  end→closed ${fmt(r.endToClosed)}`}\n  source: ${r.inputText || ''}\n  translation: ${r.outputText || ''}`);
 }
 fs.writeFileSync(path.join(OUT, 'results.json'), JSON.stringify(results, null, 2));
 const ok = results.filter((r) => r.endToFirstAudio != null);
 const lat = ok.map((r) => r.endToFirstAudio).sort((a, b) => a - b);
 if (lat.length) {
   const avg = lat.reduce((a, b) => a + b, 0) / lat.length;
-  console.log(`\n표본 ${lat.length}건 / 평균 ${fmt(avg)} / 중앙값 ${fmt(lat[Math.floor(lat.length / 2)])} / 가장 느림 ${fmt(lat[lat.length - 1])} (인증 ${AUTH})`);
+  console.log(`\n${lat.length} samples / avg ${fmt(avg)} / median ${fmt(lat[Math.floor(lat.length / 2)])} / slowest ${fmt(lat[lat.length - 1])} (auth ${AUTH})`);
 }
 
 function synth(c) {
@@ -54,8 +54,8 @@ async function runCase(c, pcm) {
   let tEnd = null, tFirstAudio = null, tFirstText = null, tClosed = null, tStart = null;
 
   await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('시간 초과')), 60_000);
-    ws.on('unexpected-response', (_req, res) => { clearTimeout(timer); reject(new Error(`연결 거부 HTTP ${res.statusCode}`)); });
+    const timer = setTimeout(() => reject(new Error('timeout')), 60_000);
+    ws.on('unexpected-response', (_req, res) => { clearTimeout(timer); reject(new Error(`connection refused HTTP ${res.statusCode}`)); });
     ws.on('error', (e) => { clearTimeout(timer); reject(e); });
     ws.on('open', () => {
       ws.send(JSON.stringify({ type: 'session.update', session: { audio: sessionConfig(c.target).audio } }));
@@ -121,7 +121,7 @@ function readWavPcm(file) {
     if (id === 'data') return buf.subarray(p + 8, p + 8 + size);
     p += 8 + size + (size % 2);
   }
-  throw new Error('wav data 없음');
+  throw new Error('no wav data');
 }
 function writeWav(file, pcm) {
   const h = Buffer.alloc(44);
@@ -130,7 +130,7 @@ function writeWav(file, pcm) {
   h.writeUInt32LE(48000, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write('data', 36); h.writeUInt32LE(pcm.length, 40);
   fs.writeFileSync(file, Buffer.concat([h, pcm]));
 }
-function fmt(ms) { return ms == null ? '-' : `${(ms / 1000).toFixed(2)}초`; }
+function fmt(ms) { return ms == null ? '-' : `${(ms / 1000).toFixed(2)}s`; }
 function loadEnv(file) {
   if (!fs.existsSync(file)) return;
   for (const line of fs.readFileSync(file, 'utf8').split('\n')) {

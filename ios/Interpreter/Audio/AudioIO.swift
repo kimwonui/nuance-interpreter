@@ -224,19 +224,19 @@ final class AudioIO {
     }
 
     static func routeName() -> String {
-        guard let out = AVAudioSession.sharedInstance().currentRoute.outputs.first else { return "출력 없음" }
+        guard let out = AVAudioSession.sharedInstance().currentRoute.outputs.first else { return "No output" }
         switch out.portType {
-        case .builtInSpeaker: return "iPhone 스피커"
-        case .builtInReceiver: return "iPhone 수화기"
-        case .headphones: return "유선 이어폰"
+        case .builtInSpeaker: return "iPhone speaker"
+        case .builtInReceiver: return "iPhone earpiece"
+        case .headphones: return "Wired headphones"
         case .bluetoothA2DP, .bluetoothHFP, .bluetoothLE: return out.portName
-        case .carAudio: return "차량 오디오"
+        case .carAudio: return "Car audio"
         default: return out.portName
         }
     }
 
     enum AudioError: LocalizedError {
         case noInput
-        var errorDescription: String? { "마이크 입력을 찾을 수 없어요" }
+        var errorDescription: String? { "Couldn't find a microphone input" }
     }
 }

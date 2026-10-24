@@ -16,9 +16,9 @@ enum TicketError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .notConfigured: return "통역 서버 주소가 설정되지 않았어요"
-        case .server(let code, let msg): return "통역 서버 오류(\(code)): \(msg)"
-        case .network(let msg): return "통역 서버에 연결할 수 없어요 (\(msg))"
+        case .notConfigured: return "The interpretation server URL isn't set"
+        case .server(let code, let msg): return "Server error (\(code)): \(msg)"
+        case .network(let msg): return "Can't reach the interpretation server (\(msg))"
         }
     }
 }
@@ -34,7 +34,7 @@ final class TokenClient {
         appKey = key.isEmpty ? nil : key
     }
 
-    var serverDescription: String { baseURL?.host ?? "미설정" }
+    var serverDescription: String { baseURL?.host ?? "not set" }
 
     func ticket(target: Lang) async throws -> SessionTicket {
         guard let baseURL else { throw TicketError.notConfigured }
@@ -53,7 +53,7 @@ final class TokenClient {
         }
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard code == 200 else {
-            let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String ?? "알 수 없음"
+            let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String ?? "unknown"
             throw TicketError.server(code, msg)
         }
         return try JSONDecoder().decode(SessionTicket.self, from: data)

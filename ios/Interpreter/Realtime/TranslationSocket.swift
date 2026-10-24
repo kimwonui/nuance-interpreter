@@ -32,7 +32,7 @@ final class TranslationSocket: NSObject, URLSessionWebSocketDelegate {
     }
 
     func connect() {
-        guard let url = URL(string: ticket.url) else { emit(.failed("잘못된 세션 주소")); return }
+        guard let url = URL(string: ticket.url) else { emit(.failed("Invalid session URL")); return }
         var req = URLRequest(url: url)
         if ticket.mode == "direct" {
             req.setValue("Bearer \(ticket.token)", forHTTPHeaderField: "Authorization")
@@ -116,7 +116,7 @@ final class TranslationSocket: NSObject, URLSessionWebSocketDelegate {
             emit(.closed)
             task?.cancel(with: .normalClosure, reason: nil)
         case "error":
-            let msg = (obj["error"] as? [String: Any])?["message"] as? String ?? "통역 오류"
+            let msg = (obj["error"] as? [String: Any])?["message"] as? String ?? "Interpretation error"
             log.error("server error: \(msg, privacy: .public)")
             emit(.failed(msg))
         default:
@@ -149,7 +149,7 @@ final class TranslationSocket: NSObject, URLSessionWebSocketDelegate {
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
         if !finished {
             finished = true
-            let why = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "연결 종료(\(closeCode.rawValue))"
+            let why = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "Connection closed (\(closeCode.rawValue))"
             emit(.failed(why))
         }
     }
@@ -158,7 +158,7 @@ final class TranslationSocket: NSObject, URLSessionWebSocketDelegate {
         guard let error, !finished else { return }
         finished = true
         var msg = error.localizedDescription
-        if let http = task.response as? HTTPURLResponse { msg = "연결 거부(HTTP \(http.statusCode))" }
+        if let http = task.response as? HTTPURLResponse { msg = "Connection refused (HTTP \(http.statusCode))" }
         emit(.failed(msg))
     }
 }

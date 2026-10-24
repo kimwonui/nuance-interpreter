@@ -14,7 +14,7 @@ struct SpeakerDock: View {
                     controller.tapSpeaker(controller.rightLang)
                 }
             }
-            Text("음성·대화는 저장하지 않아요 · 통역을 위해 OpenAI로 전송돼요")
+            Text("Nothing is saved · Audio goes to OpenAI to interpret")
                 .font(.noto(11, .regular))
                 .foregroundStyle(Theme.textSecondary)
         }
@@ -87,16 +87,16 @@ struct SpeakerButton: View {
         }
         .buttonStyle(PressScale())
         .disabled(state == .waiting || state == .disabled)
-        .accessibilityLabel(state == .active ? "\(lang.name) 말하기 끝내기" : "\(lang.name) 말하기")
+        .accessibilityLabel(state == .active ? "Done speaking \(lang.name)" : "Speak \(lang.name)")
     }
 
     private var subtitle: String {
         switch state {
         case .idle: return lang.speakHint
-        case .active: return lang == .ko ? "한국어 → 상대 언어 통역" : "English → other language"
+        case .active: return "\(lang.name) → other language"
         case .waiting: return lang.waitingHint
         case .cutIn: return lang.cutInHint
-        case .disabled: return lang == .ko ? "연결되면 쓸 수 있어요" : "Available when connected"
+        case .disabled: return "Available when connected"
         }
     }
 

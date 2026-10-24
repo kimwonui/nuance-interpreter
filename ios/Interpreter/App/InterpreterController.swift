@@ -28,7 +28,7 @@ final class InterpreterController: ObservableObject {
     @Published var leftLang: Lang = .ko
     @Published var rightLang: Lang = .en
     @Published private(set) var mic: Mic = .undetermined
-    @Published private(set) var route = "iPhone 스피커"
+    @Published private(set) var route = "iPhone speaker"
     @Published private(set) var level: Float = 0
     @Published private(set) var outputLevel: Float = 0
     @Published private(set) var connectionError: String?
@@ -90,7 +90,7 @@ final class InterpreterController: ObservableObject {
             running = true
             return true
         } catch {
-            connectionError = "오디오를 시작할 수 없어요: \(error.localizedDescription)"
+            connectionError = "Couldn't start audio: \(error.localizedDescription)"
             return false
         }
     }
@@ -194,7 +194,7 @@ final class InterpreterController: ObservableObject {
         audio.beginCapture()
 
         if isLocalTest {
-            update(id) { $0.sourceText = "[테스트 신호] 실제 마이크 입력 확인 중 · 통역 안 함" }
+            update(id) { $0.sourceText = "[TEST SIGNAL] Real mic input only · not interpreting" }
             return
         }
         if let s = prepared.removeValue(forKey: target), !s.isStale {
@@ -242,7 +242,7 @@ final class InterpreterController: ObservableObject {
                                    : "테스트 신호입니다. 오브가 이 목소리에 맞춰 움직여야 해요."
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in
             guard let self, let cur = self.turns.first(where: { $0.id == id }), cur.status == .translating else { return }
-            self.update(id) { $0.targetText = "[테스트 신호] " + text }
+            self.update(id) { $0.targetText = "[TEST SIGNAL] " + text }
             self.testSignal.synthesize(text, language: t.target == .en ? "en-US" : "ko-KR") { [weak self] pcm in
                 guard let self else { return }
                 if let pcm { self.turnEvent(.audio(pcm), turn: id) } else { self.turnEvent(.closed, turn: id) }

@@ -77,15 +77,15 @@ function relay(client, target) {
     if (client.readyState === WebSocket.OPEN) client.close();
     if (upstream.readyState === WebSocket.OPEN) upstream.close();
   };
-  upstream.on('close', () => { console.log(`[relay ${target}] 종료`, JSON.stringify(counts)); end(); });
-  upstream.on('error', (e) => { console.log(`[relay ${target}] 오류`, e.message); end(); });
+  upstream.on('close', () => { console.log(`[relay ${target}] closed`, JSON.stringify(counts)); end(); });
+  upstream.on('error', (e) => { console.log(`[relay ${target}] error`, e.message); end(); });
   client.on('close', end);
 }
 
 server.listen(PORT, '0.0.0.0', () => {
   const ips = Object.values(os.networkInterfaces()).flat().filter((i) => i && i.family === 'IPv4' && !i.internal).map((i) => i.address);
-  console.log(`통역 개발 서버 :${PORT} (${RELAY ? '중계' : '직접'} 모드, 키 ${API_KEY ? '있음' : '없음'})`);
-  for (const ip of ips) console.log(`  아이폰에서: http://${ip}:${PORT}`);
+  console.log(`NUA dev server :${PORT} (${RELAY ? 'relay' : 'direct'} mode, key ${API_KEY ? 'present' : 'missing'})`);
+  for (const ip of ips) console.log(`  From iPhone: http://${ip}:${PORT}`);
 });
 
 function json(res, status, obj) {

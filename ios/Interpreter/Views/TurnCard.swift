@@ -14,7 +14,7 @@ struct TurnCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("\(turn.source == .ko ? "한국어" : turn.source.name) → \(turn.target.code)")
+                Text("\(turn.source.code) → \(turn.target.code)")
                     .font(.noto(11, .medium))
                     .foregroundStyle(isFromSecondSpeaker ? Theme.textSecondary : Theme.accentText)
                     .padding(.horizontal, 8)
@@ -25,7 +25,7 @@ struct TurnCard: View {
             }
 
             if !turn.sourceText.isEmpty || turn.status == .listening {
-                Text(turn.sourceText.isEmpty ? "말씀하세요…" : turn.sourceText)
+                Text(turn.sourceText.isEmpty ? "Speak now…" : turn.sourceText)
                     .font(.noto(14, .regular))
                     .foregroundStyle(Theme.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -59,20 +59,20 @@ struct TurnCard: View {
     private var statusView: some View {
         switch turn.status {
         case .connecting, .listening:
-            pill("mic.fill", "듣는 중")
+            pill("mic.fill", "Listening")
         case .translating:
-            pill("arrow.triangle.2.circlepath", "통역 중")
+            pill("arrow.triangle.2.circlepath", "Interpreting")
         case .playing:
-            pill("speaker.wave.2.fill", "재생 중 · 탭하면 멈춤")
+            pill("speaker.wave.2.fill", "Playing · tap to stop")
         case .failed:
-            Text("통역 실패").font(.noto(12, .medium)).foregroundStyle(Theme.accentText)
+            Text("Failed").font(.noto(12, .medium)).foregroundStyle(Theme.accentText)
         case .empty:
-            Text("통역할 말이 없음").font(.noto(12, .regular)).foregroundStyle(Theme.textSecondary)
+            Text("Nothing to interpret").font(.noto(12, .regular)).foregroundStyle(Theme.textSecondary)
         case .interrupted:
-            Text("중단됨").font(.noto(12, .regular)).foregroundStyle(Theme.textSecondary)
+            Text("Stopped").font(.noto(12, .regular)).foregroundStyle(Theme.textSecondary)
         case .done:
             if isPlaying {
-                pill("speaker.wave.2.fill", "다시 듣는 중")
+                pill("speaker.wave.2.fill", "Replaying")
             } else {
                 Text(turn.createdAt, format: .dateTime.hour().minute()).font(.noto(12, .regular)).foregroundStyle(Theme.textSecondary)
             }
@@ -89,7 +89,7 @@ struct TurnCard: View {
                 Spacer(minLength: 0)
                 if !turn.inputAudio.isEmpty {
                     Button(action: onRetry) {
-                        Label("재시도", systemImage: "arrow.clockwise")
+                        Label("Retry", systemImage: "arrow.clockwise")
                             .font(.noto(13, .bold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 14)
@@ -100,18 +100,18 @@ struct TurnCard: View {
             }
         case .empty:
             HStack {
-                Text("같은 언어로 말했거나 소리가 작았을 수 있어요.").font(.noto(12, .regular)).foregroundStyle(Theme.textSecondary)
+                Text("You may have spoken the same language, or too quietly.").font(.noto(12, .regular)).foregroundStyle(Theme.textSecondary)
                 Spacer()
-                action("arrow.clockwise", "재시도", onRetry)
+                action("arrow.clockwise", "Retry", onRetry)
             }
         case .done, .interrupted:
             HStack(spacing: 16) {
-                if !turn.outputAudio.isEmpty { action("gobackward", "다시 듣기", onReplay) }
-                if !turn.inputAudio.isEmpty { action("arrow.clockwise", "재시도", onRetry) }
-                if !turn.targetText.isEmpty { action("doc.on.doc", "복사", onCopy) }
+                if !turn.outputAudio.isEmpty { action("gobackward", "Replay", onReplay) }
+                if !turn.inputAudio.isEmpty { action("arrow.clockwise", "Retry", onRetry) }
+                if !turn.targetText.isEmpty { action("doc.on.doc", "Copy", onCopy) }
                 Spacer()
                 if showLatency, let l = turn.metrics.endToFirstSound {
-                    Text(String(format: "끝→첫 소리 %.2f초", l)).font(.noto(11, .regular)).foregroundStyle(Theme.textSecondary)
+                    Text(String(format: "Done→first audio %.2fs", l)).font(.noto(11, .regular)).foregroundStyle(Theme.textSecondary)
                 }
             }
             .padding(.top, 4)

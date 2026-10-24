@@ -30,9 +30,9 @@
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>개발 중에는 같은 와이파이의 통역 서버에 연결해요.</string>
+	<string>During development, NUA connects to the interpretation server on your local network.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>말한 내용을 상대 언어로 통역하려면 마이크가 필요해요. 음성은 저장하지 않아요.</string>
+	<string>NUA uses the microphone to interpret what you say. Audio is not saved.</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>NotoSansKR_400Regular.ttf</string>

@@ -14,20 +14,20 @@ struct OnboardingView: View {
                 .frame(width: 88, height: 88)
                 .background(Theme.gradient(scheme), in: RoundedRectangle(cornerRadius: 28))
                 .shadow(color: .black.opacity(0.14), radius: 18, y: 6)
-            Text("NUA 누아\n말투까지 옮기는 통역").font(.noto(28, .bold)).foregroundStyle(Theme.text)
-            Text("한국어와 영어로 마주 보고 대화하세요.\n말한 사람의 의도와 감정을 최대한 살려\n상대 언어 음성으로 들려드려요.")
+            Text("NUA\nInterpretation that\nkeeps the nuance").font(.noto(28, .bold)).foregroundStyle(Theme.text)
+            Text("Talk face to face in Korean and English.\nNUA carries each speaker's intent and emotion\ninto speech in the other language.")
                 .font(.noto(15, .medium))
                 .foregroundStyle(Theme.textSecondary)
                 .lineSpacing(4)
             VStack(alignment: .leading, spacing: 12) {
-                bullet("mic.fill", "말할 사람이 자기 언어 버튼을 누르고 말해요")
-                bullet("speaker.wave.2.fill", "말이 끝나면 상대 언어로 바로 재생돼요")
-                bullet("checkmark.shield.fill", "음성·대화는 기기에 저장하지 않아요")
+                bullet("mic.fill", "Each speaker taps their language and talks")
+                bullet("speaker.wave.2.fill", "The interpretation plays as soon as they finish")
+                bullet("checkmark.shield.fill", "Audio and conversations aren't saved on this device")
             }
             .padding(.top, 8)
             Spacer()
             Button(action: onStart) {
-                Text("시작하기")
+                Text("Get started")
                     .font(.noto(17, .bold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
@@ -35,7 +35,7 @@ struct OnboardingView: View {
                     .background(Theme.gradient(scheme), in: RoundedRectangle(cornerRadius: Radius.cta))
             }
             .buttonStyle(PressScale())
-            Text("마이크 권한을 요청해요")
+            Text("We'll ask for microphone access")
                 .font(.noto(12, .regular))
                 .foregroundStyle(Theme.textSecondary)
                 .frame(maxWidth: .infinity)
@@ -69,8 +69,8 @@ struct PermissionView: View {
                 .foregroundStyle(Theme.accent)
                 .frame(width: 96, height: 96)
                 .background(Theme.badge, in: Circle())
-            Text("마이크 권한이 필요해요").font(.noto(22, .bold)).foregroundStyle(Theme.text)
-            Text("통역하려면 말소리를 들어야 해요.\n설정 > 앱 > 이 앱 > 마이크를 켜 주세요.")
+            Text("Microphone access needed").font(.noto(22, .bold)).foregroundStyle(Theme.text)
+            Text("NUA needs to hear speech to interpret.\nGo to Settings > Apps > NUA > Microphone.")
                 .font(.noto(15, .regular))
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
@@ -78,7 +78,7 @@ struct PermissionView: View {
             Button {
                 if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
             } label: {
-                Text("설정 열기")
+                Text("Open Settings")
                     .font(.noto(17, .bold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
@@ -86,7 +86,7 @@ struct PermissionView: View {
                     .background(Theme.gradient(scheme), in: RoundedRectangle(cornerRadius: Radius.cta))
             }
             .buttonStyle(PressScale())
-            Button("다시 확인") { Task { await controller.recheckMic() } }
+            Button("Check again") { Task { await controller.recheckMic() } }
                 .font(.noto(15, .bold))
                 .foregroundStyle(Theme.textSecondary)
                 .padding(.bottom, 8)

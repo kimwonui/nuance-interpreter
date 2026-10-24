@@ -12,7 +12,7 @@ struct LanguageBar: View {
                     .foregroundStyle(Theme.textSecondary)
                     .frame(width: 28, height: 36)
             }
-            .accessibilityLabel("언어 바꾸기")
+            .accessibilityLabel("Swap languages")
             chip(controller.rightLang, left: false)
         }
         .padding(.horizontal, 6)

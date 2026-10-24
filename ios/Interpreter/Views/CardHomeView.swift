@@ -39,7 +39,7 @@ struct CardHomeView: View {
                     .background(Theme.surfaceRaised, in: Circle())
                     .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
             }
-            .accessibilityLabel("설정")
+            .accessibilityLabel("Settings")
         }
         .padding(.leading, 20)
         .padding(.trailing, 16)
@@ -92,11 +92,11 @@ struct EmptyStateView: View {
                 .foregroundStyle(Theme.accent)
                 .frame(width: 88, height: 88)
                 .background(Theme.badge, in: Circle())
-            Text("버튼을 누르고 말하면\n상대 언어로 들려드려요")
+            Text("Tap a button and speak.\nNUA says it in the other language.")
                 .font(.noto(20, .bold))
                 .multilineTextAlignment(.center)
                 .foregroundStyle(Theme.text)
-            Text("말이 끝나면 같은 버튼을 한 번 더 누르세요.\n통역 음성이 이 아이폰 스피커로 나와요.")
+            Text("When you're done, tap the same button again.\nThe interpretation plays from this iPhone.")
                 .font(.noto(14, .regular))
                 .multilineTextAlignment(.center)
                 .foregroundStyle(Theme.textSecondary)
@@ -116,11 +116,11 @@ struct ErrorBanner: View {
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(Theme.accentText)
             VStack(alignment: .leading, spacing: 2) {
-                Text("통역 서버에 연결할 수 없어요").font(.noto(14, .bold)).foregroundStyle(Theme.text)
+                Text("Can't reach the interpretation server").font(.noto(14, .bold)).foregroundStyle(Theme.text)
                 Text(message).font(.noto(12, .regular)).foregroundStyle(Theme.textSecondary).lineLimit(2)
             }
             Spacer(minLength: 0)
-            Button("다시 시도", action: onRetry)
+            Button("Retry", action: onRetry)
                 .font(.noto(13, .bold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 14)
