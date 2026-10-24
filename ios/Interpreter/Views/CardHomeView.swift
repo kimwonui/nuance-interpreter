@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// I01~I05, I08: 대화 홈.
-struct HomeView: View {
+// V1(이전안, 비교용 보존) I01~I05, I08: 카드 중심 대화 홈.
+struct CardHomeView: View {
     @ObservedObject var controller: InterpreterController
     @State private var showSettings = false
 

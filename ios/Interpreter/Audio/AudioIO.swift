@@ -12,6 +12,8 @@ final class AudioIO {
 
     var onMicChunk: ((Data) -> Void)?
     var onLevel: ((Float) -> Void)?
+    /// 실제로 재생되고 있는 번역 음성의 음량(RMS). 오브 출력 반응에 쓴다.
+    var onOutputLevel: ((Float) -> Void)?
     var onPlaybackDrained: (() -> Void)?
     var onRouteChange: ((String) -> Void)?
     var onInterruption: ((Bool) -> Void)?
@@ -37,6 +39,14 @@ final class AudioIO {
         if engine.attachedNodes.contains(player) == false {
             engine.attach(player)
             engine.connect(player, to: engine.mainMixerNode, format: playFormat)
+            // 재생 노드 출력에 탭: 스피커로 나가는 실제 소리의 크기를 잰다.
+            player.installTap(onBus: 0, bufferSize: 1_024, format: nil) { [weak self] buffer, _ in
+                guard let self, let ch = buffer.floatChannelData, buffer.frameLength > 0 else { return }
+                let n = Int(buffer.frameLength)
+                var sum: Float = 0
+                for i in 0..<n { sum += ch[0][i] * ch[0][i] }
+                self.onOutputLevel?(self.isPlaying ? sqrt(sum / Float(n)) : 0)
+            }
         }
         try installTapAndStart()
         observeSession()

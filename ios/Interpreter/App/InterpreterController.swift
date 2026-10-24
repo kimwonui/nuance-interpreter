@@ -30,6 +30,7 @@ final class InterpreterController: ObservableObject {
     @Published private(set) var mic: Mic = .undetermined
     @Published private(set) var route = "iPhone 스피커"
     @Published private(set) var level: Float = 0
+    @Published private(set) var outputLevel: Float = 0
     @Published private(set) var connectionError: String?
     @Published private(set) var playingTurnID: UUID?
     @Published private(set) var latency: [LatencySample] = []
@@ -39,7 +40,17 @@ final class InterpreterController: ObservableObject {
 
     var serverDescription: String { tokens.serverDescription }
 
+    /// 실행 인자 -localTest: 서버 없이 실제 마이크 입력 + 기기 합성 "테스트 신호" 재생으로 오브·재생 경로만 확인(통역 안 함).
+    /// 실행 인자 -autoDemo: 위 모드 + 정해진 순서로 버튼을 자동으로 눌러 모션을 녹화할 수 있게 한다.
+    let isAutoDemo = ProcessInfo.processInfo.arguments.contains("-autoDemo")
+    lazy var isLocalTest: Bool = isAutoDemo || ProcessInfo.processInfo.arguments.contains("-localTest")
+
     private let audio = AudioIO()
+    private let testSignal = TestSignal()
+    private var active = false
+    private var demoStarted = false
+    private var peakIn: Float = 0   // 발화별 최대 입력 음량(검증 로그용, 숫자만)
+    private var peakOut: Float = 0  // 발화별 최대 재생 음량
     private let tokens = TokenClient()
     private var prepared: [Lang: TranslationSocket] = [:]
     private var preparing: Set<Lang> = []
@@ -52,34 +63,45 @@ final class InterpreterController: ObservableObject {
 
     init() {
         audio.onRouteChange = { [weak self] name in DispatchQueue.main.async { self?.route = name } }
-        audio.onLevel = { [weak self] v in DispatchQueue.main.async { self?.level = v } }
+        audio.onLevel = { [weak self] v in DispatchQueue.main.async { self?.level = v; self?.peakIn = max(self?.peakIn ?? 0, v) } }
+        audio.onOutputLevel = { [weak self] v in DispatchQueue.main.async { self?.outputLevel = v; self?.peakOut = max(self?.peakOut ?? 0, v) } }
         audio.onPlaybackDrained = { [weak self] in self?.playbackDrained() }
         audio.onInterruption = { [weak self] began in if began { self?.handleInterruptionBegan() } }
     }
 
     // MARK: 시작·종료
 
+    /// 화면이 보이면 호출: 통역 세션을 미리 열고, 마이크 권한이 이미 있으면 오디오를 켠다.
+    /// 마이크 권한 요청은 처음 말하기 버튼을 누를 때 한다.
     func start() async {
-        guard !running else { return }
-        mic = await Self.micPermission(request: true)
-        guard mic == .granted else { return }
+        active = true
+        mic = await Self.micPermission(request: false)
+        if mic == .granted { startAudioIfNeeded() }
+        prepare(leftLang)
+        prepare(rightLang)
+        if isAutoDemo && !demoStarted { demoStarted = true; runAutoDemo() }
+    }
+
+    @discardableResult
+    private func startAudioIfNeeded() -> Bool {
+        if running { return true }
         do {
             try audio.start()
             running = true
+            return true
         } catch {
             connectionError = "오디오를 시작할 수 없어요: \(error.localizedDescription)"
-            return
+            return false
         }
-        prepare(leftLang)
-        prepare(rightLang)
     }
 
     func recheckMic() async {
         mic = await Self.micPermission(request: false)
-        if mic == .granted { await start() }
+        if mic == .granted { startAudioIfNeeded() }
     }
 
     func suspend() {
+        active = false
         guard running else { return }
         if let id = liveTurnID { cancelTurn(id, as: .interrupted) }
         audio.stopPlayback()
@@ -96,7 +118,8 @@ final class InterpreterController: ObservableObject {
 
     func retryConnection() {
         connectionError = nil
-        if !running { Task { await start() } } else { prepare(leftLang); prepare(rightLang) }
+        prepare(leftLang)
+        prepare(rightLang)
     }
 
     static func micPermission(request: Bool) async -> Mic {
@@ -112,6 +135,14 @@ final class InterpreterController: ObservableObject {
     // MARK: 화자 버튼
 
     func tapSpeaker(_ lang: Lang) {
+        if mic != .granted || !running {
+            Task {
+                mic = await Self.micPermission(request: true)
+                guard mic == .granted, startAudioIfNeeded() else { return }
+                tapSpeaker(lang)
+            }
+            return
+        }
         switch phase {
         case .listening(let l):
             if l == lang { finishListening() }
@@ -152,6 +183,8 @@ final class InterpreterController: ObservableObject {
         turns.append(turn)
         let id = turn.id
         liveTurnID = id
+        peakIn = 0
+        peakOut = 0
         phase = .listening(source)
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
 
@@ -160,6 +193,10 @@ final class InterpreterController: ObservableObject {
         }
         audio.beginCapture()
 
+        if isLocalTest {
+            update(id) { $0.sourceText = "[테스트 신호] 실제 마이크 입력 확인 중 · 통역 안 함" }
+            return
+        }
         if let s = prepared.removeValue(forKey: target), !s.isStale {
             attach(s, to: id)
         } else {
@@ -194,6 +231,30 @@ final class InterpreterController: ObservableObject {
             if let rest { self.micChunk(rest, turn: id) }
             self.sockets[id]?.finish()
             self.flushHeldAudio(id)
+            if self.isLocalTest { self.runTestOutput(id) }
+        }
+    }
+
+    /// 테스트 신호: 0.9초 "처리" 뒤 기기 합성 음성을 번역 음성 자리에 흘려 실제 재생 경로·출력 반응을 확인한다.
+    private func runTestOutput(_ id: UUID) {
+        guard let t = turns.first(where: { $0.id == id }) else { return }
+        let text = t.target == .en ? "This is a local test signal. The orb should move with this voice."
+                                   : "테스트 신호입니다. 오브가 이 목소리에 맞춰 움직여야 해요."
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in
+            guard let self, let cur = self.turns.first(where: { $0.id == id }), cur.status == .translating else { return }
+            self.update(id) { $0.targetText = "[테스트 신호] " + text }
+            self.testSignal.synthesize(text, language: t.target == .en ? "en-US" : "ko-KR") { [weak self] pcm in
+                guard let self else { return }
+                if let pcm { self.turnEvent(.audio(pcm), turn: id) } else { self.turnEvent(.closed, turn: id) }
+            }
+        }
+    }
+
+    /// 자동 시연(-autoDemo): 대기 → 한국어 듣기 4초 → 처리 → 재생 → 대기 → 영어 듣기 4초 → 처리 → 재생.
+    private func runAutoDemo() {
+        let steps: [(Double, Lang)] = [(3, .ko), (7, .ko), (16, .en), (20, .en)]
+        for (t, lang) in steps {
+            DispatchQueue.main.asyncAfter(deadline: .now() + t) { [weak self] in self?.tapSpeaker(lang) }
         }
     }
 
@@ -221,7 +282,7 @@ final class InterpreterController: ObservableObject {
     // MARK: 통역 이벤트
 
     private func turnEvent(_ e: TranslationSocket.Event, turn id: UUID) {
-        guard index(id) != nil else { return }
+        guard let cur = turns.first(where: { $0.id == id }), cur.status != .interrupted else { return }
         switch e {
         case .inputText(let d):
             update(id) { $0.sourceText += d }
@@ -397,7 +458,7 @@ final class InterpreterController: ObservableObject {
     // MARK: 세션 준비
 
     private func prepare(_ target: Lang) {
-        guard running else { return }
+        guard active, !isLocalTest else { return }
         if let s = prepared[target], !s.isStale { return }
         prepared[target]?.cancel()
         prepared[target] = nil
@@ -436,6 +497,6 @@ final class InterpreterController: ObservableObject {
         let speech = Double(t.inputAudio.count) / 2 / AudioIO.sampleRate
         let s = LatencySample(direction: "\(t.source.code)→\(t.target.code)", speechSec: speech, endToFirstSound: t.metrics.endToFirstSound, endToClosed: t.metrics.endToClosed)
         latency.append(s)
-        log.info("turn \(s.direction, privacy: .public) speech=\(speech, format: .fixed(precision: 2)) endToFirstSound=\(s.endToFirstSound ?? -1, format: .fixed(precision: 3)) endToClosed=\(s.endToClosed ?? -1, format: .fixed(precision: 3)) route=\(self.route, privacy: .public)")
+        log.info("turn \(s.direction, privacy: .public) speech=\(speech, format: .fixed(precision: 2)) endToFirstSound=\(s.endToFirstSound ?? -1, format: .fixed(precision: 3)) endToClosed=\(s.endToClosed ?? -1, format: .fixed(precision: 3)) route=\(self.route, privacy: .public) peakIn=\(self.peakIn, format: .fixed(precision: 4)) peakOut=\(self.peakOut, format: .fixed(precision: 4)) test=\(self.isLocalTest)")
     }
 }

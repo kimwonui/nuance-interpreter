@@ -4,6 +4,7 @@ import SwiftUI
 struct SettingsSheet: View {
     @ObservedObject var controller: InterpreterController
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("uiVersion") private var uiVersion = "orb"
 
     var body: some View {
         ScrollView {
@@ -24,6 +25,15 @@ struct SettingsSheet: View {
                 group("언어", note: "통역 엔진은 더 많은 언어를 지원해요. 다른 언어는 순서대로 열 예정이에요.") {
                     row("globe", "내 언어", controller.leftLang.name)
                     row("globe", "상대 언어", controller.rightLang.name)
+                }
+
+                group("화면", note: "카드 중심은 이전 디자인이에요. 비교용으로 남겨 뒀어요.") {
+                    Picker("화면", selection: $uiVersion) {
+                        Text("오브 중심").tag("orb")
+                        Text("카드 중심 (이전안)").tag("card")
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(12)
                 }
 
                 group("화자 전환", note: "말할 사람이 자기 언어 버튼을 직접 누르는 방식이에요. 자동 감지는 아직 준비 중이에요.") {
