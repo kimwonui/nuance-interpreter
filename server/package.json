@@ -1,0 +1,13 @@
+{
+  "name": "nuance-interpreter-server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node dev-server.mjs",
+    "dev:relay": "RELAY=1 node dev-server.mjs",
+    "eval": "node scripts/eval.mjs"
+  },
+  "dependencies": {
+    "ws": "8.18.3"
+  }
+}
