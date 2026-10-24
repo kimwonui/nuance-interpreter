@@ -1,0 +1,6 @@
+.env*
+.vercel
+eval-out
+node_modules
+scripts
+dev-server.mjs

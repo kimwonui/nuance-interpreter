@@ -6,6 +6,7 @@ import os
 /// session.close 를 보내면 남은 번역을 마저 내보낸 뒤 session.closed 로 끝난다.
 final class TranslationSocket: NSObject, URLSessionWebSocketDelegate {
     enum Event {
+        case opened
         case inputText(String)
         case outputText(String)
         case audio(Data)
@@ -16,6 +17,12 @@ final class TranslationSocket: NSObject, URLSessionWebSocketDelegate {
     let target: Lang
     let createdAt = Date()
     var onEvent: ((Event) -> Void)?
+    /// Time spent fetching the short-lived key, set by the caller (ms).
+    var ticketMs: Double = 0
+    private var connectStartedAt: CFAbsoluteTime?
+    private(set) var openedAt: CFAbsoluteTime?
+    /// Connection preparation = key fetch + WebSocket open (ms). nil until open.
+    var prepMs: Double? { openedAt.flatMap { o in connectStartedAt.map { ticketMs + (o - $0) * 1000 } } }
 
     private let ticket: SessionTicket
     private var task: URLSessionWebSocketTask?
@@ -37,6 +44,7 @@ final class TranslationSocket: NSObject, URLSessionWebSocketDelegate {
         if ticket.mode == "direct" {
             req.setValue("Bearer \(ticket.token)", forHTTPHeaderField: "Authorization")
         }
+        connectStartedAt = CFAbsoluteTimeGetCurrent()
         let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
         urlSession = session
         let t = session.webSocketTask(with: req)
@@ -131,6 +139,8 @@ final class TranslationSocket: NSObject, URLSessionWebSocketDelegate {
     // MARK: URLSessionWebSocketDelegate
 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
+        openedAt = CFAbsoluteTimeGetCurrent()
+        emit(.opened)
         sendQueue.async { [weak self] in
             guard let self else { return }
             self.opened = true

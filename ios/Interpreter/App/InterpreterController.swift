@@ -44,6 +44,8 @@ final class InterpreterController: ObservableObject {
     /// 실행 인자 -autoDemo: 위 모드 + 정해진 순서로 버튼을 자동으로 눌러 모션을 녹화할 수 있게 한다.
     let isAutoDemo = ProcessInfo.processInfo.arguments.contains("-autoDemo")
     lazy var isLocalTest: Bool = isAutoDemo || ProcessInfo.processInfo.arguments.contains("-localTest")
+    /// Launch argument -autoTurns: REAL interpretation with scripted taps (for on-device latency runs).
+    let isAutoTurns = ProcessInfo.processInfo.arguments.contains("-autoTurns")
 
     private let audio = AudioIO()
     private let testSignal = TestSignal()
@@ -80,6 +82,7 @@ final class InterpreterController: ObservableObject {
         prepare(leftLang)
         prepare(rightLang)
         if isAutoDemo && !demoStarted { demoStarted = true; runAutoDemo() }
+        if isAutoTurns && !demoStarted { demoStarted = true; runAutoTurns() }
     }
 
     @discardableResult
@@ -149,9 +152,18 @@ final class InterpreterController: ObservableObject {
         case .idle:
             startListening(lang)
         case .finishing, .playing:
+            tokens.report(["mode": "cutin", "route": route])
             interruptPlayback()
             startListening(lang)
         }
+    }
+
+    private func makeSocket(_ target: Lang) async throws -> TranslationSocket {
+        let t0 = CFAbsoluteTimeGetCurrent()
+        let ticket = try await tokens.ticket(target: target)
+        let s = TranslationSocket(target: target, ticket: ticket)
+        s.ticketMs = (CFAbsoluteTimeGetCurrent() - t0) * 1000
+        return s
     }
 
     func swapLanguages() {
@@ -202,8 +214,7 @@ final class InterpreterController: ObservableObject {
         } else {
             Task {
                 do {
-                    let t = try await tokens.ticket(target: target)
-                    let s = TranslationSocket(target: target, ticket: t)
+                    let s = try await makeSocket(target)
                     s.connect()
                     attach(s, to: id)
                 } catch {
@@ -258,6 +269,15 @@ final class InterpreterController: ObservableObject {
         }
     }
 
+    /// Real-mode script: KO, EN, KO, EN turns of 4 s each, ~26 s apart (session rate limits),
+    /// then a cut-in during the last playback.
+    private func runAutoTurns() {
+        let steps: [(Double, Lang)] = [(4, .ko), (8, .ko), (30, .en), (34, .en), (56, .ko), (60, .ko), (82, .en), (86, .en), (87.2, .ko), (89.5, .ko)]
+        for (t, lang) in steps {
+            DispatchQueue.main.asyncAfter(deadline: .now() + t) { [weak self] in self?.tapSpeaker(lang) }
+        }
+    }
+
     private func micChunk(_ chunk: Data, turn id: UUID) {
         guard let i = index(id) else { return }
         turns[i].inputAudio.append(chunk)
@@ -267,7 +287,11 @@ final class InterpreterController: ObservableObject {
     private func attach(_ s: TranslationSocket, to id: UUID) {
         guard let turn = turns.first(where: { $0.id == id }), turn.isLive else { s.cancel(); return }
         sockets[id] = s
-        s.onEvent = { [weak self] e in self?.turnEvent(e, turn: id) }
+        update(id) { $0.metrics.prewarmed = s.openedAt != nil; $0.metrics.prepMs = s.prepMs }
+        s.onEvent = { [weak self, weak s] e in
+            if case .opened = e, let s { self?.update(id) { $0.metrics.prepMs = s.prepMs } }
+            self?.turnEvent(e, turn: id)
+        }
         // 소켓 준비 전에 쌓인 음성을 먼저 보낸다.
         var off = 0
         let audioSoFar = turn.inputAudio
@@ -284,6 +308,8 @@ final class InterpreterController: ObservableObject {
     private func turnEvent(_ e: TranslationSocket.Event, turn id: UUID) {
         guard let cur = turns.first(where: { $0.id == id }), cur.status != .interrupted else { return }
         switch e {
+        case .opened:
+            break
         case .inputText(let d):
             update(id) { $0.sourceText += d }
         case .outputText(let d):
@@ -292,13 +318,15 @@ final class InterpreterController: ObservableObject {
             update(id) {
                 $0.outputAudio.append(pcm)
                 if $0.metrics.tFirstAudio == nil { $0.metrics.tFirstAudio = CFAbsoluteTimeGetCurrent() }
+                if $0.metrics.tFirstVoiced == nil, SilenceGate.hasVoice(pcm) { $0.metrics.tFirstVoiced = CFAbsoluteTimeGetCurrent() }
             }
             if let t = turns.first(where: { $0.id == id }), t.status != .listening { flushHeldAudio(id) }
         case .closed:
             closed.insert(id)
             sockets[id] = nil
             update(id) { $0.metrics.tClosed = CFAbsoluteTimeGetCurrent() }
-            if let t = turns.first(where: { $0.id == id }), t.outputAudio.isEmpty {
+            if let t = turns.first(where: { $0.id == id }), !SilenceGate.hasVoice(t.outputAudio) {
+                tokens.report(["mode": "empty", "direction": "\(t.source.code)→\(t.target.code)", "speechSec": Double(t.inputAudio.count) / 48_000])
                 update(id) { $0.status = .empty }
                 endTurn(id)
             } else if playingTurnID != id || !audio.isPlaying {
@@ -323,8 +351,11 @@ final class InterpreterController: ObservableObject {
         let t = turns[i]
         guard t.outputAudio.count > t.playedBytes else { return }
         if let other = playingTurnID, other != id { return }
-        audio.enqueue(pcm16: t.outputAudio.subdata(in: t.playedBytes..<t.outputAudio.count))
+        let fresh = t.outputAudio.subdata(in: t.playedBytes..<t.outputAudio.count)
         turns[i].playedBytes = t.outputAudio.count
+        let play = SilenceGate.process(fresh, turn: &turns[i])
+        guard !play.isEmpty else { return } // padding silence only — keep waiting
+        audio.enqueue(pcm16: play)
         if turns[i].metrics.tPlaybackStart == nil, turns[i].metrics.tStop != nil {
             turns[i].metrics.tPlaybackStart = CFAbsoluteTimeGetCurrent()
         }
@@ -362,6 +393,10 @@ final class InterpreterController: ObservableObject {
     }
 
     private func failTurn(_ id: UUID, _ msg: String) {
+        if let t = turns.first(where: { $0.id == id }) {
+            // Short error label only (no speech content).
+            tokens.report(["mode": "failed", "direction": "\(t.source.code)→\(t.target.code)", "route": String(msg.prefix(40))])
+        }
         if liveTurnID == id, case .listening = phase { audio.endCapture(); level = 0 }
         sockets[id]?.cancel()
         sockets[id] = nil
@@ -409,7 +444,7 @@ final class InterpreterController: ObservableObject {
         replayingID = id
         playingTurnID = id
         phase = .playing
-        audio.enqueue(pcm16: t.outputAudio)
+        audio.enqueue(pcm16: SilenceGate.trimmed(t.outputAudio))
     }
 
     func stopPlayback() {
@@ -424,6 +459,8 @@ final class InterpreterController: ObservableObject {
         turns[i].sourceText = ""
         turns[i].outputAudio = Data()
         turns[i].playedBytes = 0
+        turns[i].voicedStarted = false
+        turns[i].pendingSilence = Data()
         turns[i].status = .translating
         turns[i].metrics = TurnMetrics(tTap: nil, tStop: CFAbsoluteTimeGetCurrent())
         closed.remove(id)
@@ -433,7 +470,7 @@ final class InterpreterController: ObservableObject {
             do {
                 let s: TranslationSocket
                 if let p = prepared.removeValue(forKey: target), !p.isStale { s = p } else {
-                    s = TranslationSocket(target: target, ticket: try await tokens.ticket(target: target))
+                    s = try await makeSocket(target)
                     s.connect()
                 }
                 attach(s, to: id)
@@ -467,8 +504,7 @@ final class InterpreterController: ObservableObject {
         Task {
             defer { preparing.remove(target) }
             do {
-                let t = try await tokens.ticket(target: target)
-                let s = TranslationSocket(target: target, ticket: t)
+                let s = try await makeSocket(target)
                 s.onEvent = { [weak self, weak s] e in
                     // 대기 중 세션이 끊기면 버리고, 곧바로 끊긴 경우(인증 거부 등)만 오류로 알린다.
                     guard let self, let s, case .failed(let msg) = e, self.prepared[target] === s else { return }
@@ -498,5 +534,14 @@ final class InterpreterController: ObservableObject {
         let s = LatencySample(direction: "\(t.source.code)→\(t.target.code)", speechSec: speech, endToFirstSound: t.metrics.endToFirstSound, endToClosed: t.metrics.endToClosed)
         latency.append(s)
         log.info("turn \(s.direction, privacy: .public) speech=\(speech, format: .fixed(precision: 2)) endToFirstSound=\(s.endToFirstSound ?? -1, format: .fixed(precision: 3)) endToClosed=\(s.endToClosed ?? -1, format: .fixed(precision: 3)) route=\(self.route, privacy: .public) peakIn=\(self.peakIn, format: .fixed(precision: 4)) peakOut=\(self.peakOut, format: .fixed(precision: 4)) test=\(self.isLocalTest)")
+        var m: [String: Any] = ["direction": s.direction, "speechSec": speech, "prewarmed": t.metrics.prewarmed,
+                                "route": route, "mode": isLocalTest ? "test-signal" : (isAutoTurns ? "auto-turns" : "manual"),
+                                "trimmedLeadSec": Double(t.metrics.trimmedLeadBytes) / 48_000,
+                                "trimmedTailSec": Double(t.metrics.trimmedTailBytes + t.pendingSilence.count) / 48_000]
+        if let v = t.metrics.prepMs { m["prepMs"] = v }
+        if let v = t.metrics.endToFirstSound { m["endToFirstSound"] = v }
+        if let v = t.metrics.endToFirstVoicedArrival { m["endToFirstVoicedArrival"] = v }
+        if let v = t.metrics.endToClosed { m["endToClosed"] = v }
+        tokens.report(m)
     }
 }

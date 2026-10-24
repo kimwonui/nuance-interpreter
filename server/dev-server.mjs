@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
-import { createClientSecret, rateLimited, sessionConfig, SUPPORTED_TARGETS, TRANSLATE_WS_URL } from './lib/openai.mjs';
+import { cleanMetrics, createClientSecret, rateLimited, sessionConfig, SUPPORTED_TARGETS, TRANSLATE_WS_URL } from './lib/openai.mjs';
 
 loadEnvFile(new URL('./.env.local', import.meta.url));
 const PORT = Number(process.env.PORT || 8787);
@@ -45,6 +45,11 @@ const server = http.createServer(async (req, res) => {
       console.log(`[session] direct target=${target} failed status=${e.status} code=${e.code}`);
       return json(res, 502, { error: e.code || `upstream ${e.status}` });
     }
+  }
+  if (req.method === 'POST' && url.pathname === '/api/metrics') {
+    if (APP_KEY && req.headers['x-app-key'] !== APP_KEY) return json(res, 401, { error: 'unauthorized' });
+    console.log('[metrics] ' + JSON.stringify(cleanMetrics(await readJson(req))));
+    res.writeHead(204); return res.end();
   }
   json(res, 404, { error: 'not found' });
 });

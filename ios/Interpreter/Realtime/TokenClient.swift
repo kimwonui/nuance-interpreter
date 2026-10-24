@@ -58,4 +58,18 @@ final class TokenClient {
         }
         return try JSONDecoder().decode(SessionTicket.self, from: data)
     }
+
+    /// Development builds only: send latency numbers (never speech content) to the server log.
+    func report(_ metrics: [String: Any]) {
+        #if DEBUG
+        guard let baseURL, let body = try? JSONSerialization.data(withJSONObject: metrics) else { return }
+        var req = URLRequest(url: baseURL.appendingPathComponent("api/metrics"))
+        req.httpMethod = "POST"
+        req.timeoutInterval = 5
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let appKey { req.setValue(appKey, forHTTPHeaderField: "X-App-Key") }
+        req.httpBody = body
+        URLSession.shared.dataTask(with: req).resume()
+        #endif
+    }
 }

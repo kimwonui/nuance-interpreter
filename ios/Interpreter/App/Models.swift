@@ -35,13 +35,23 @@ struct TurnMetrics {
     var tTap: Double?
     var tStop: Double?
     var tFirstAudio: Double?       // 첫 번역 음성 조각 도착
+    var tFirstVoiced: Double?      // first output chunk that actually contains speech (not padding silence)
     var tPlaybackStart: Double?    // 말 끝 이후 실제 재생 시작
     var tClosed: Double?
+    var prepMs: Double?            // ticket fetch + WebSocket open, measured separately from speech latency
+    var prewarmed = false          // session was already open before the speaker tapped
+    var trimmedLeadBytes = 0       // leading output silence skipped
+    var trimmedTailBytes = 0       // pause/trailing silence skipped
 
     /// 말 끝(끝 버튼 탭) → 첫 번역 소리 재생 시작
     var endToFirstSound: Double? {
         guard let s = tStop, let p = tPlaybackStart else { return nil }
         return max(0, p - s)
+    }
+    /// Done → first voiced output chunk arrived (negative = arrived while the speaker was still talking)
+    var endToFirstVoicedArrival: Double? {
+        guard let s = tStop, let v = tFirstVoiced else { return nil }
+        return v - s
     }
     var endToClosed: Double? {
         guard let s = tStop, let c = tClosed else { return nil }
@@ -60,6 +70,8 @@ struct Turn: Identifiable {
     var inputAudio = Data()   // 재시도용
     var outputAudio = Data()  // 다시 듣기용
     var playedBytes = 0       // 말하는 동안 보류했다가 재생한 위치
+    var voicedStarted = false // output speech has begun (leading padding silence is skipped)
+    var pendingSilence = Data() // silence after speech, played only if more speech follows
     var metrics = TurnMetrics()
     let createdAt = Date()
 
