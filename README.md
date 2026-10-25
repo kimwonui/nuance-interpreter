@@ -24,7 +24,25 @@ server/   token server (the OpenAI key lives only here)
 docs/test-sentences.json negation, questions, sarcasm, honorifics, casual speech, emphasis, hesitation, commands (must not be executed), both directions
 ```
 
-## Screen (V2, orb-centered, default)
+## Testing policy (owner decision, 2026-10-24)
+
+- All testing is done by the owner on the owner's iPhone with the installed build.
+- No simulator runs, no scripted runs (`-autoDemo`, `-autoTurns`, `-autoStart`, `-localTest`), no synthetic-voice interpretation tests, and no one speaks into the device on the owner's behalf.
+- Engineering stops at: build → sign → install on the owner's iPhone → confirm the token server is reachable.
+- Function, quality, and speed are judged only from the owner's own tests and the technical logs they produce (numbers-only `/api/metrics` entries in the Vercel function log).
+- A successful build or install is never reported as "interpretation verified".
+
+## Hands-free mode (default)
+
+1. Tap **Start conversation** — this is the only thing that turns the mic on (nothing records at launch). The iOS mic indicator shows the real state; **Mute** turns the mic engine off, **Stop** ends everything.
+2. NUA keeps two interpretation sessions open (→English and →Korean) and listens with a local voice detector. Audio is sent only while someone speaks (0.5 s pre-roll so the first syllable isn't lost, 1.5 s tail), never during silence.
+3. The →English session also returns the source transcript (`gpt-4o-mini-transcribe`, enabled from the client). Hangul vs. Latin letters decides the direction; the matching session's audio plays, the other is dropped. Fallback without a transcript: which session produced speech.
+4. While NUA talks, the mic isn't streamed (no feedback loop). Echo cancellation is on; speaking loudly over NUA for 0.4 s cuts it off. If a new transcript matches what NUA just said, it's treated as echo and ignored.
+5. Push to talk remains in Settings → Conversation.
+
+Known limits: the model has one output language per session and no detected-language event (hence two sessions, ~2× audio minutes while someone speaks); very short replies (e.g. "네, 좋아요.") may get no translation because the model waits for more context; pauses longer than 0.7 s end an utterance (a resumed sentence within 2 s before any output is merged back).
+
+## Screen (V2, orb-centered)
 
 The orb is the hero from first launch. Captions and history are secondary; the only controls are two speaker pills.
 

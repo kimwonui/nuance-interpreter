@@ -15,6 +15,9 @@ final class InterpreterController: ObservableObject {
         case playing
     }
     enum Mic { case undetermined, granted, denied }
+    /// auto = hands-free (default): one Start, NUA detects Korean/English and interprets each utterance.
+    /// manual = push-to-talk: tap your language, speak, tap Done.
+    enum Mode: String { case auto, manual }
 
     struct LatencySample {
         let direction: String
@@ -37,6 +40,13 @@ final class InterpreterController: ObservableObject {
     @Published var showLatency: Bool = UserDefaults.standard.bool(forKey: "showLatency") {
         didSet { UserDefaults.standard.set(showLatency, forKey: "showLatency") }
     }
+    @Published var mode: Mode = Mode(rawValue: UserDefaults.standard.string(forKey: "conversationMode") ?? "") ?? .auto {
+        didSet {
+            UserDefaults.standard.set(mode.rawValue, forKey: "conversationMode")
+            if mode == .manual, autoState != .off { stopConversation() }
+        }
+    }
+    @Published private(set) var autoState: AutoConversation.State = .off
 
     var serverDescription: String { tokens.serverDescription }
 
@@ -61,6 +71,7 @@ final class InterpreterController: ObservableObject {
     private var liveTurnID: UUID?
     private var replayingID: UUID?
     private var running = false
+    private var autoEngine: AutoConversation!
     private let log = Logger(subsystem: "interp", category: "latency")
 
     init() {
@@ -69,6 +80,68 @@ final class InterpreterController: ObservableObject {
         audio.onOutputLevel = { [weak self] v in DispatchQueue.main.async { self?.outputLevel = v; self?.peakOut = max(self?.peakOut ?? 0, v) } }
         audio.onPlaybackDrained = { [weak self] in self?.playbackDrained() }
         audio.onInterruption = { [weak self] began in if began { self?.handleInterruptionBegan() } }
+        autoEngine = AutoConversation(audio: audio) { [unowned self] target in try await self.makeSocket(target) }
+        autoEngine.onState = { [weak self] s in self?.autoState = s }
+        autoEngine.onNewTurn = { [weak self] t in self?.turns.append(t) }
+        autoEngine.onUpdateTurn = { [weak self] id, body in self?.update(id, body) }
+        autoEngine.onPlaying = { [weak self] id in self?.playingTurnID = id }
+        autoEngine.onError = { [weak self] msg in self?.connectionError = msg; self?.stopConversation() }
+        autoEngine.report = { [weak self] m in
+            guard let self else { return }
+            self.tokens.report(m)
+            if let d = m["direction"] as? String, let sp = m["speechSec"] as? Double {
+                self.latency.append(LatencySample(direction: d, speechSec: sp, endToFirstSound: m["endToFirstSound"] as? Double, endToClosed: nil))
+            }
+        }
+    }
+
+    // MARK: Hands-free
+
+    /// Starts the mic and the two interpretation sessions. Only called from the Start button.
+    func startConversation() {
+        guard autoState == .off else { return }
+        Task {
+            mic = await Self.micPermission(request: true)
+            guard mic == .granted else { return }
+            do {
+                try audio.start(voiceProcessing: true)
+                running = true
+            } catch {
+                connectionError = "Couldn't start audio: \(error.localizedDescription)"
+                return
+            }
+            connectionError = nil
+            audio.onMicChunk = { [weak self] chunk in DispatchQueue.main.async { self?.autoEngine.mic(chunk) } }
+            audio.beginCapture()
+            autoEngine.start(pair: (leftLang, rightLang))
+        }
+    }
+
+    /// Stops listening completely: sessions closed, mic engine stopped (iOS mic indicator goes off).
+    func stopConversation() {
+        autoEngine.stop()
+        audio.endCapture()
+        audio.onMicChunk = nil
+        audio.stop()
+        running = false
+        level = 0
+        outputLevel = 0
+    }
+
+    /// Mute turns the mic engine off but keeps the sessions; Unmute turns it back on.
+    func toggleMute() {
+        if autoState == .muted {
+            do { try audio.start(voiceProcessing: true); running = true } catch { connectionError = "Couldn't start audio: \(error.localizedDescription)"; return }
+            audio.onMicChunk = { [weak self] chunk in DispatchQueue.main.async { self?.autoEngine.mic(chunk) } }
+            audio.beginCapture()
+            autoEngine.setMuted(false)
+        } else if autoState != .off {
+            autoEngine.setMuted(true)
+            audio.endCapture()
+            audio.stop()
+            running = false
+            level = 0
+        }
     }
 
     // MARK: 시작·종료
@@ -78,11 +151,20 @@ final class InterpreterController: ObservableObject {
     func start() async {
         active = true
         mic = await Self.micPermission(request: false)
-        if mic == .granted { startAudioIfNeeded() }
-        prepare(leftLang)
-        prepare(rightLang)
+        // The mic is never opened at launch. Push-to-talk prewarms its sessions (no audio is sent);
+        // hands-free opens everything only when Start is tapped.
+        if mode == .manual {
+            prepare(leftLang)
+            prepare(rightLang)
+        }
         if isAutoDemo && !demoStarted { demoStarted = true; runAutoDemo() }
         if isAutoTurns && !demoStarted { demoStarted = true; runAutoTurns() }
+        // Test-only launch argument: tap "Start conversation" automatically (hands-free runs).
+        if ProcessInfo.processInfo.arguments.contains("-autoStart") && !demoStarted {
+            demoStarted = true
+            mode = .auto
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.startConversation() }
+        }
     }
 
     @discardableResult
@@ -105,6 +187,7 @@ final class InterpreterController: ObservableObject {
 
     func suspend() {
         active = false
+        if autoState != .off { stopConversation() }
         guard running else { return }
         if let id = liveTurnID { cancelTurn(id, as: .interrupted) }
         audio.stopPlayback()
@@ -121,8 +204,10 @@ final class InterpreterController: ObservableObject {
 
     func retryConnection() {
         connectionError = nil
-        prepare(leftLang)
-        prepare(rightLang)
+        if mode == .manual {
+            prepare(leftLang)
+            prepare(rightLang)
+        }
     }
 
     static func micPermission(request: Bool) async -> Mic {
@@ -365,6 +450,7 @@ final class InterpreterController: ObservableObject {
     }
 
     private func playbackDrained() {
+        if replayingID == nil, autoEngine.isOn { autoEngine.playbackDrained(); return }
         if let r = replayingID {
             replayingID = nil
             if playingTurnID == r { playingTurnID = nil }
@@ -449,6 +535,7 @@ final class InterpreterController: ObservableObject {
 
     func stopPlayback() {
         if phase == .playing { interruptPlayback() }
+        if autoState == .speaking { audio.stopPlayback(); autoEngine.playbackDrained() }
     }
 
     func retry(_ id: UUID) {

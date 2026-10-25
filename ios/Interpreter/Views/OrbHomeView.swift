@@ -24,7 +24,7 @@ struct OrbHomeView: View {
                 .foregroundStyle(Theme.accentText)
                 .accessibilityLabel("NUA")
             OrbView(mode: orbMode, inputLevel: controller.level, outputLevel: controller.outputLevel, accessibilityText: "\(status.title). \(status.sub)")
-                .onTapGesture { if controller.phase == .playing { controller.stopPlayback() } }
+                .onTapGesture { if controller.phase == .playing || controller.autoState == .speaking { controller.stopPlayback() } }
             VStack(spacing: 4) {
                 Text(status.title).font(.noto(17, .bold)).foregroundStyle(Theme.text)
                 Text(status.sub).font(.noto(13, .regular)).foregroundStyle(Theme.textSecondary)
@@ -52,6 +52,16 @@ struct OrbHomeView: View {
 
     private var orbMode: OrbView.Mode {
         if controller.mic == .denied { return .disabled }
+        if controller.mode == .auto, controller.autoState != .off {
+            switch controller.autoState {
+            case .connecting, .interpreting: return .processing
+            case .waiting, .hearing: return .listening   // mic is live: the orb follows the real mic level
+            case .speaking: return .speaking
+            case .muted: return .disabled
+            case .off: return .idle
+            }
+        }
+        if controller.phase == .playing { return .speaking } // Replay
         switch controller.phase {
         case .idle: return controller.connectionError != nil ? .disabled : .idle
         case .listening: return .listening
@@ -62,6 +72,22 @@ struct OrbHomeView: View {
 
     private var status: (title: String, sub: String) {
         if controller.mic == .denied { return ("Microphone access needed", "NUA needs to hear speech to interpret · Not listening") }
+        if controller.mode == .auto {
+            switch controller.autoState {
+            case .off:
+                if controller.connectionError != nil { return ("Not connected", "Mic off · Not listening") }
+                if controller.phase == .playing { return ("Playing", "Tap the orb to stop") }
+                return ("Ready", "Mic off · Tap Start conversation")
+            case .connecting: return ("Connecting…", "Getting the interpreter ready")
+            case .waiting: return ("Listening", "Speak Korean or English")
+            case .hearing: return ("Hearing you…", "NUA interprets when you pause")
+            case .interpreting: return ("Interpreting", "Keeping the tone and intent")
+            case .speaking:
+                let lang = controller.turns.last?.target.name ?? ""
+                return ("Speaking \(lang)", "Talk to cut in · Tap the orb to stop")
+            case .muted: return ("Muted", "Mic off · Tap Unmute to continue")
+            }
+        }
         switch controller.phase {
         case .idle:
             if controller.connectionError != nil { return ("Not connected", "Not listening") }
@@ -124,7 +150,7 @@ struct OrbHomeView: View {
             .padding(.horizontal, 14)
             .frame(height: 40)
             .background(Theme.surface, in: Capsule())
-            .disabled(controller.phase != .idle)
+            .disabled(controller.phase != .idle || controller.autoState != .off)
             Spacer()
             circleButton("slider.horizontal.3", "Settings") { showSettings = true }
         }
@@ -180,7 +206,7 @@ struct OrbHomeView: View {
         .frame(maxWidth: .infinity, minHeight: 132)
         .contentShape(Rectangle())
         .onTapGesture {
-            guard let t = turn, controller.phase == .idle else { return }
+            guard let t = turn, controller.phase == .idle, controller.autoState == .off || controller.autoState == .waiting else { return }
             if case .failed = t.status { controller.retry(t.id) } else { controller.replay(t.id) }
         }
         .accessibilityHint(turn == nil ? "" : "Tap to replay")
@@ -188,14 +214,65 @@ struct OrbHomeView: View {
 
     private var bottom: some View {
         VStack(spacing: 10) {
-            HStack(spacing: 12) {
-                SpeakerPill(lang: controller.leftLang, state: pillState(controller.leftLang)) { controller.tapSpeaker(controller.leftLang) }
-                SpeakerPill(lang: controller.rightLang, state: pillState(controller.rightLang)) { controller.tapSpeaker(controller.rightLang) }
+            if controller.mode == .auto {
+                autoControls
+            } else {
+                HStack(spacing: 12) {
+                    SpeakerPill(lang: controller.leftLang, state: pillState(controller.leftLang)) { controller.tapSpeaker(controller.leftLang) }
+                    SpeakerPill(lang: controller.rightLang, state: pillState(controller.rightLang)) { controller.tapSpeaker(controller.rightLang) }
+                }
             }
             Text("Nothing is saved · Audio goes to OpenAI to interpret")
                 .font(.noto(11, .regular)).foregroundStyle(Theme.textSecondary)
         }
         .padding(.bottom, 4)
+    }
+
+    /// Hands-free controls: one Start; while on, Mute and Stop are always visible.
+    @ViewBuilder
+    private var autoControls: some View {
+        if controller.autoState == .off {
+            Button { controller.startConversation() } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "mic.fill").font(.system(size: 15, weight: .bold))
+                    Text("Start conversation").font(.noto(17, .bold))
+                }
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, minHeight: 64)
+                .background(Capsule().fill(Theme.gradient(scheme)))
+                .shadow(color: .black.opacity(0.2), radius: 10, y: 3)
+            }
+            .buttonStyle(PressScale())
+            .disabled(controller.mic == .denied)
+            .accessibilityHint("Turns on the microphone and starts listening for Korean or English")
+        } else {
+            HStack(spacing: 12) {
+                Button { controller.toggleMute() } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: controller.autoState == .muted ? "mic.fill" : "mic.slash.fill").font(.system(size: 14, weight: .bold))
+                        Text(controller.autoState == .muted ? "Unmute" : "Mute").font(.noto(15, .bold))
+                    }
+                    .foregroundStyle(Theme.text)
+                    .frame(maxWidth: .infinity, minHeight: 64)
+                    .background(Capsule().fill(Theme.surfaceRaised))
+                    .shadow(color: .black.opacity(0.12), radius: 10, y: 3)
+                }
+                .buttonStyle(PressScale())
+                Button { controller.stopConversation() } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "stop.fill").font(.system(size: 14, weight: .bold))
+                        Text("Stop").font(.noto(15, .bold))
+                    }
+                    .foregroundStyle(Theme.accentText)
+                    .frame(maxWidth: .infinity, minHeight: 64)
+                    .background(Capsule().fill(Theme.surfaceRaised))
+                    .overlay(Capsule().strokeBorder(Theme.accent, lineWidth: 1.5))
+                    .shadow(color: .black.opacity(0.12), radius: 10, y: 3)
+                }
+                .buttonStyle(PressScale())
+                .accessibilityHint("Stops listening and turns the microphone off")
+            }
+        }
     }
 
     private func pillState(_ lang: Lang) -> SpeakerPill.State {

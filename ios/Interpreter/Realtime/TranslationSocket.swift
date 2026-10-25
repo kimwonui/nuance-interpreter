@@ -19,6 +19,9 @@ final class TranslationSocket: NSObject, URLSessionWebSocketDelegate {
     var onEvent: ((Event) -> Void)?
     /// Time spent fetching the short-lived key, set by the caller (ms).
     var ticketMs: Double = 0
+    /// Source-language transcript model, enabled from the client with session.update (verified 2026-10-24).
+    /// Hands-free mode uses it on one session to tell Korean from English. nil = no transcript.
+    var transcribeModel: String?
     private var connectStartedAt: CFAbsoluteTime?
     private(set) var openedAt: CFAbsoluteTime?
     /// Connection preparation = key fetch + WebSocket open (ms). nil until open.
@@ -146,7 +149,9 @@ final class TranslationSocket: NSObject, URLSessionWebSocketDelegate {
             self.opened = true
             if self.ticket.mode == "direct" {
                 // 임시 키에 이미 설정이 들어 있지만, 출력 언어를 한 번 더 명시한다.
-                let update: [String: Any] = ["type": "session.update", "session": ["audio": ["output": ["language": self.target.rawValue]]]]
+                var audio: [String: Any] = ["output": ["language": self.target.rawValue]]
+                if let model = self.transcribeModel { audio["input"] = ["transcription": ["model": model]] }
+                let update: [String: Any] = ["type": "session.update", "session": ["audio": audio]]
                 if let d = try? JSONSerialization.data(withJSONObject: update), let s = String(data: d, encoding: .utf8) {
                     self.task?.send(.string(s)) { _ in }
                 }

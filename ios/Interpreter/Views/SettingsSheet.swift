@@ -36,8 +36,15 @@ struct SettingsSheet: View {
                     .padding(12)
                 }
 
-                group("Speaker switching", note: "Each speaker taps their own language button. Automatic detection isn't available yet.") {
-                    row("hand.tap", "Mode", "Buttons")
+                group("Conversation", note: controller.mode == .auto
+                      ? "Hands-free: tap Start once. NUA detects Korean or English and interprets when the speaker pauses. Very short replies may not be interpreted."
+                      : "Push to talk: tap your language, speak, then tap Done.") {
+                    Picker("Conversation", selection: $controller.mode) {
+                        Text("Hands-free").tag(InterpreterController.Mode.auto)
+                        Text("Push to talk").tag(InterpreterController.Mode.manual)
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(12)
                 }
 
                 group("Audio", note: "Audio switches automatically when you connect headphones or Bluetooth.") {

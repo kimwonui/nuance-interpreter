@@ -33,9 +33,17 @@ final class AudioIO {
     private let log = Logger(subsystem: "interp", category: "audio")
 
     var isRunning: Bool { engine.isRunning }
+    /// Apple voice processing (echo cancellation + noise suppression) on the mic. Used in hands-free
+    /// mode so NUA's own playback is removed from the mic signal and talking over it can be detected.
+    private(set) var voiceProcessing = false
 
-    func start() throws {
+    func start(voiceProcessing: Bool = false) throws {
+        if engine.isRunning, voiceProcessing != self.voiceProcessing { engine.stop() }
         try configureSession()
+        if engine.inputNode.isVoiceProcessingEnabled != voiceProcessing {
+            try engine.inputNode.setVoiceProcessingEnabled(voiceProcessing)
+        }
+        self.voiceProcessing = voiceProcessing
         if engine.attachedNodes.contains(player) == false {
             engine.attach(player)
             engine.connect(player, to: engine.mainMixerNode, format: playFormat)
@@ -48,7 +56,7 @@ final class AudioIO {
                 self.onOutputLevel?(self.isPlaying ? sqrt(sum / Float(n)) : 0)
             }
         }
-        try installTapAndStart()
+        if !engine.isRunning { try installTapAndStart() }
         observeSession()
         onRouteChange?(Self.routeName())
     }
