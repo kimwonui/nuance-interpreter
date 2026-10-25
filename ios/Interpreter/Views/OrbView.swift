@@ -1,19 +1,17 @@
 import SwiftUI
 
-/// Center orb. Motion numbers follow the Figma "Orb motion spec" (node 9:37) plus the speaking styles below.
-/// - idle: breathing + slow inner color flow (mic off, tap to start) — alive, but no "listening" rings
-/// - listening: follows the real mic level; while it's quiet, a time-based halo and inner flow keep it visibly
-///   alive (they never react to the mic, so they can't fake hearing)
+/// Center orb, in the style of a voice-assistant sphere: a steady round orb whose inside is soft light and color
+/// clouds that blend and drift all the time. Breathing and level reactions are kept small; the inner flow is
+/// what shows it's alive. NUA's coral palette.
+/// - idle: calm, slower flow (mic off, tap to start)
+/// - listening: livelier flow; size and rings follow the real mic level only (the flow never reacts to sound)
 /// - holding: NUA's voice is buffered until the speaker pauses — slow orbiting dashes, no level reaction
-/// - processing: rotating angular gradient + sweeping arc + orbit dots (connecting)
-/// The body is living, viscous matter (motion reference: a symbiote, not its look): thin tendrils stretch out of
-/// the mass at irregular angles, bend and curl, get sucked back in, and the body wobbles elastically where they
-/// went in. Big slow deformation of the mass, small faster ripples on the edge. Coral, lit like a gel.
-/// Reduce Motion: a still organic shape; each state shows a steady cue instead (ring, arc).
+/// - processing: faster flow + rotating gradient, sweeping arc and orbit dots (connecting)
 /// - speaking(lang): follows the real playback level, styled with the output language's decorative flag
-///   (English: waving stripes; Korean: turning taegeuk; others: waving bands/emblems); nil = neutral
-///   gradient. Flags are a visual cue for the output language only — the status text names it in words.
-/// - disabled: static grey (stopped, error, no permission, muted) — never pretends to listen
+///   (English: waving stripes; Korean: turning taegeuk; others: waving bands/emblems); nil = neutral clouds.
+///   Flags are a visual cue for the output language only — the status text names it in words.
+/// - disabled: static grey (error, no permission, muted) — never pretends to listen
+/// Reduce Motion: the clouds stand still and the orb doesn't scale; state cues stay (arc, rings, dashes).
 struct OrbView: View {
     enum Mode: Equatable { case idle, listening, holding, processing, speaking(Lang?), disabled }
 
@@ -51,6 +49,16 @@ struct OrbView: View {
 
     // MARK: Drawing
 
+    /// Soft color clouds inside the orb: (color, size × R, drift speed x, drift speed y, phase offset).
+    /// Unrelated speeds make them pass through and blend into each other without a visible loop.
+    private static let clouds: [(UInt32, Double, Double, Double, Double)] = [
+        (0xFFB27A, 0.78, 0.53, 0.37, 0.0),   // peach
+        (0xFF6F95, 0.70, -0.41, 0.59, 2.1),  // pink
+        (0xE8344E, 0.80, 0.29, -0.47, 4.2),  // deep coral
+        (0xFFFFFF, 0.55, -0.61, -0.33, 1.3), // light
+        (0xFF8A5C, 0.60, 0.67, 0.23, 5.1),   // orange
+    ]
+
     private func draw(_ gc: inout GraphicsContext, size: CGSize, f: OrbDriver.Frame) {
         let c = CGPoint(x: size.width / 2, y: size.height / 2)
         let R = 95 * f.scale * Double(diameter / 320)
@@ -60,33 +68,23 @@ struct OrbView: View {
         let tl = CGPoint(x: c.x - R, y: c.y - R), br = CGPoint(x: c.x + R, y: c.y + R)
         let color = 1 - f.grey
 
-        // Glow (tinted toward the output language while speaking)
+        // Glow
         if f.glow * color > 0.01 {
             gc.drawLayer { layer in
                 layer.addFilter(.blur(radius: 40))
                 layer.opacity = f.glow * color
                 let r = R * 1.02
-                let rect = CGRect(x: c.x - r, y: c.y - r + 12, width: r * 2, height: r * 2)
-                layer.fill(Path(ellipseIn: rect), with: .linearGradient(linear, startPoint: tl, endPoint: br))
+                layer.fill(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r + 12, width: r * 2, height: r * 2)), with: .linearGradient(linear, startPoint: tl, endPoint: br))
             }
         }
-        // Listening rings (mic level)
-        for (k, op) in [(1.16, 0.22), (1.3, 0.1)] where f.rings > 0.01 {
+        // Listening rings (real mic level only)
+        for (k, op) in [(1.14, 0.22), (1.26, 0.1)] where f.rings > 0.01 {
             let r = R * k
             gc.stroke(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)), with: .color(Theme.accent.opacity(op * f.rings * 2.2)), lineWidth: 2)
         }
-        // Listening halo: time-based expanding rings (alive while quiet; not tied to the mic level)
-        if f.halo > 0.01 {
-            for off in [0.0, 0.5] {
-                let p = (f.haloP + off).truncatingRemainder(dividingBy: 1)
-                let r = R * (1.06 + 0.3 * p)
-                gc.stroke(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)),
-                          with: .color(Theme.accent.opacity(0.26 * (1 - p) * f.halo * color)), lineWidth: 2.5)
-            }
-        }
         // Connecting: a bright arc sweeping around the orb
         if f.sweep > 0.01 {
-            let r = R * 1.22
+            let r = R * 1.2
             var arc = Path()
             arc.addArc(center: c, radius: r, startAngle: .radians(f.sweepAngle), endAngle: .radians(f.sweepAngle + 1.3), clockwise: false)
             gc.stroke(arc, with: .color(Theme.accent.opacity(0.7 * f.sweep)), style: StrokeStyle(lineWidth: 3, lineCap: .round))
@@ -98,20 +96,18 @@ struct OrbView: View {
             ring.addArc(center: c, radius: r, startAngle: .radians(f.holdAngle), endAngle: .radians(f.holdAngle + 2 * .pi), clockwise: false)
             gc.stroke(ring, with: .color(Theme.accent.opacity(0.45 * f.hold)), style: StrokeStyle(lineWidth: 2.5, lineCap: .round, dash: [6, 10]))
         }
-        // Output ripples (playback level)
-        let rippleColor = Theme.accent
+        // Output ripples (real playback level)
         for p in f.ripples {
-            let r = R * (1 + 0.5 * p)
-            gc.stroke(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)), with: .color(rippleColor.opacity(0.35 * (1 - p) * f.rippleAlpha)), lineWidth: 2)
+            let r = R * (1 + 0.4 * p)
+            gc.stroke(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)), with: .color(Theme.accent.opacity(0.3 * (1 - p) * f.rippleAlpha)), lineWidth: 2)
         }
 
-        let ts = tendrilStates(phase: f.liquidPhase, reach: f.tendril, busy: f.busy)
-        let body = shape(center: c, radius: R, amp: f.amp, phase: f.liquidPhase, tendrils: ts)
+        let body = Path(ellipseIn: CGRect(x: c.x - R, y: c.y - R, width: R * 2, height: R * 2))
         if f.grey > 0.99 {
             gc.fill(body, with: .color(Theme.selected))
             return
         }
-        // Base gradient body
+        // Base gradient (rotating while connecting)
         let base = max(0, 1 - f.flag)
         if base > 0.01 {
             var g = gc
@@ -122,19 +118,18 @@ struct OrbView: View {
                 g.fill(body, with: .linearGradient(linear, startPoint: tl, endPoint: br))
             }
         }
-        // Inner flow: soft light blobs drifting inside the body (fluid gradient)
+        // Inner clouds: large, very soft blobs drifting and blending (decorative; never driven by the mic)
         if f.flow > 0.01, base > 0.01 {
             gc.drawLayer { layer in
                 layer.clip(to: body)
-                layer.addFilter(.blur(radius: 18 * Double(diameter / 320) + 6))
+                layer.addFilter(.blur(radius: R * 0.38))
                 layer.opacity = f.flow * base * color
-                let blobs: [(UInt32, Double, Double, Double)] = [(0xFFC09A, 0.55, 1.0, 0.0), (0xFF8FB0, 0.45, -1.3, 2.1), (0xFFFFFF, 0.3, 0.8, 4.0)]
-                for (hex, size, speed, offset) in blobs {
-                    let a = f.flowPhase * speed + offset
-                    let p = CGPoint(x: c.x + R * 0.38 * cos(a), y: c.y + R * 0.32 * sin(a * 1.2))
-                    let r = R * size
+                for (hex, size, sx, sy, off) in Self.clouds {
+                    let p = CGPoint(x: c.x + R * 0.5 * sin(f.flowPhase * sx + off),
+                                    y: c.y + R * 0.5 * cos(f.flowPhase * sy + off * 1.3))
+                    let r = R * size * (1 + 0.12 * sin(f.flowPhase * 0.7 + off)) // clouds swell and thin as they drift
                     layer.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)),
-                               with: .color(Color(UIColor(hex: hex)).opacity(hex == 0xFFFFFF ? 0.5 : 0.75)))
+                               with: .color(Color(UIColor(hex: hex)).opacity(hex == 0xFFFFFF ? 0.6 : 0.85)))
                 }
             }
         }
@@ -148,29 +143,18 @@ struct OrbView: View {
             }
             if case .korea = lang.flag { gc.stroke(body, with: .color(Theme.selected.opacity(f.flag)), lineWidth: 1.5) }
         }
-        // Jelly volume: shaded lower-right rim, soft highlight and a small specular spot that ride on the shape
-        if f.flag < 0.99 {
-            gc.drawLayer { layer in
-                layer.clip(to: body)
-                layer.opacity = 0.35 * color * (1 - f.flag)
-                layer.fill(body, with: .radialGradient(Gradient(colors: [.clear, .clear, Color(UIColor(hex: 0xB0153E)).opacity(0.55)]),
-                                                       center: CGPoint(x: c.x - R * 0.25, y: c.y - R * 0.3), startRadius: 0, endRadius: R * 1.35))
-            }
-        }
-        let lift = edge(R: R, amp: f.amp, phase: f.liquidPhase, theta: -2.3, tendrils: ts) / R // the highlight follows the upper-left edge
+        // Soft sphere light: gentle highlight upper-left, a little depth lower-right
         gc.drawLayer { layer in
-            layer.addFilter(.blur(radius: 22 * Double(diameter / 320) + 4))
-            layer.opacity = 0.34 * color
+            layer.clip(to: body)
+            layer.opacity = 0.22 * color * base
+            layer.fill(body, with: .radialGradient(Gradient(colors: [.clear, .clear, Color(UIColor(hex: 0xB0153E)).opacity(0.5)]),
+                                                   center: CGPoint(x: c.x - R * 0.25, y: c.y - R * 0.3), startRadius: 0, endRadius: R * 1.3))
+        }
+        gc.drawLayer { layer in
+            layer.addFilter(.blur(radius: 24 * Double(diameter / 320) + 4))
+            layer.opacity = 0.3 * color
             let hr = R * 0.5
-            let hc = CGPoint(x: c.x - R * 0.36 * lift, y: c.y - R * 0.42 * lift)
-            layer.fill(Path(ellipseIn: CGRect(x: hc.x - hr, y: hc.y - hr * 0.8, width: hr * 2, height: hr * 1.6)), with: .color(.white))
-        }
-        gc.drawLayer { layer in
-            layer.addFilter(.blur(radius: 5))
-            layer.opacity = 0.55 * color * (1 - f.flag)
-            let sr = R * 0.14
-            let sc = CGPoint(x: c.x - R * 0.5 * lift, y: c.y - R * 0.55 * lift)
-            layer.fill(Path(ellipseIn: CGRect(x: sc.x - sr, y: sc.y - sr * 0.7, width: sr * 2, height: sr * 1.4)), with: .color(.white))
+            layer.fill(Path(ellipseIn: CGRect(x: c.x - R * 0.72, y: c.y - R * 0.8, width: hr * 2, height: hr * 1.7)), with: .color(.white))
         }
         // Processing orbit dots
         if f.dots > 0.01 {
@@ -181,140 +165,24 @@ struct OrbView: View {
             }
         }
     }
-
-    private struct Tendril { var angle, ext, bump, len, curl, seed: Double }
-
-    private static func rnd(_ a: Int, _ b: Int, _ k: Int) -> Double {
-        let x = sin(Double(a &* 127 &+ b &* 311 &+ k &* 74) * 12.9898) * 43758.5453
-        return x - floor(x)
-    }
-
-    /// Four tendril slots with their own cycle lengths. Each cycle: reach out fast (eases out) → hang and curl →
-    /// sucked back in (eases in) → elastic wobble of the body. Angle, reach, curl side and whether the slot rests
-    /// at all are re-drawn every cycle, so the rhythm never repeats.
-    private func tendrilStates(phase w: Double, reach: Double, busy: Double) -> [Tendril] {
-        guard reach > 0.01 else { return [] }
-        var out: [Tendril] = []
-        for i in 0..<4 {
-            let x = w / (3.0 + 1.3 * Double(i)) + Double(i) * 0.37
-            let n = Int(floor(x)), u = x - floor(x)
-            if Self.rnd(i, n, 0) > busy { continue } // resting this cycle
-            var ext = 0.0, bump = 0.0
-            switch u {
-            case ..<0.3: ext = 1 - pow(1 - u / 0.3, 3)
-            case ..<0.55: ext = 1
-            case ..<0.82: ext = 1 - pow((u - 0.55) / 0.27, 3)
-            default: let p = (u - 0.82) / 0.18; bump = exp(-5 * p) * cos(13 * p)
-            }
-            out.append(Tendril(angle: Self.rnd(i, n, 1) * 2 * .pi + 0.35 * sin(w * 0.6 + Double(i) * 2),
-                               ext: ext, bump: bump * (0.6 + 0.4 * Self.rnd(i, n, 2)),
-                               len: reach * (0.55 + 0.45 * Self.rnd(i, n, 3)),
-                               curl: (Self.rnd(i, n, 4) > 0.5 ? 1 : -1) * (0.6 + 0.8 * Self.rnd(i, n, 5)),
-                               seed: Double(i) * 1.9))
-        }
-        return out
-    }
-
-    /// Body edge radius at angle `theta`.
-    private func edge(R: Double, amp: Double, phase w: Double, theta th: Double, tendrils: [Tendril]) -> Double {
-        // Big, slow, non-repeating deformation: harmonics whose phases wander at unrelated rates.
-        var d = 0.55 * sin(2 * th + 1.3 * sin(w * 0.31) + w * 0.17)
-            + 0.4 * sin(3 * th - 1.1 * sin(w * 0.23 + 1) - w * 0.29)
-            + 0.25 * sin(5 * th + 0.9 * sin(w * 0.41 + 2) + w * 0.13)
-        // Small, faster ripples on the surface.
-        d += 0.12 * sin(11 * th - w * 2.6) + 0.07 * sin(16 * th + w * 3.4 + 1.3)
-        var r = R * (1 + amp * d * 0.6)
-        // The mass is pulled toward each tendril (viscous neck) and wobbles where one was sucked back in.
-        for t in tendrils {
-            var delta = (th - t.angle).truncatingRemainder(dividingBy: 2 * .pi)
-            if delta > .pi { delta -= 2 * .pi } else if delta < -.pi { delta += 2 * .pi }
-            r += R * exp(-(delta * delta) / 0.2) * (0.14 * t.ext + 0.12 * t.bump)
-        }
-        return r
-    }
-
-    /// Smooth closed curve through points, wound the same way as the body (so filled together they merge).
-    private func smoothClosed(_ pts: [CGPoint]) -> Path {
-        var area = 0.0
-        for i in pts.indices { let a = pts[i], b = pts[(i + 1) % pts.count]; area += a.x * b.y - b.x * a.y }
-        let p = area < 0 ? Array(pts.reversed()) : pts
-        func mid(_ a: CGPoint, _ b: CGPoint) -> CGPoint { CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2) }
-        var path = Path()
-        path.move(to: mid(p[p.count - 1], p[0]))
-        for i in p.indices { path.addQuadCurve(to: mid(p[i], p[(i + 1) % p.count]), control: p[i]) }
-        path.closeSubpath()
-        return path
-    }
-
-    /// Body + tendrils as one shape.
-    private func shape(center c: CGPoint, radius R: Double, amp: Double, phase w: Double, tendrils: [Tendril]) -> Path {
-        let n = 96
-        var path = smoothClosed((0..<n).map { i in
-            let th = Double(i) / Double(n) * 2 * .pi
-            let r = edge(R: R, amp: amp, phase: w, theta: th, tendrils: tendrils)
-            return CGPoint(x: c.x + r * cos(th), y: c.y + r * sin(th))
-        })
-        let half = Double(diameter) / 2
-        for t in tendrils where t.ext > 0.03 {
-            let a = t.angle, u = (cos(a), sin(a)), nrm = (-sin(a), cos(a))
-            let bodyR = edge(R: R, amp: amp, phase: w, theta: a, tendrils: tendrils)
-            let start = bodyR - R * 0.2 // grows out from inside the mass
-            // Shorter up and down, so tips stay clear of the text above/below and inside the frame.
-            let maxTip = min(half - 12, R * (1.25 + 0.25 * abs(cos(a))))
-            let L = max(0, min(maxTip - start, t.len * R + R * 0.2)) * t.ext
-            guard L > R * 0.25 else { continue }
-            let baseW = R * 0.34 * t.ext.squareRoot()
-            let m = 20
-            var spine: [(CGPoint, Double)] = []
-            for k in 0...m {
-                let s = Double(k) / Double(m)
-                // Hooks to one side as it stretches, with a faster whip travelling along it.
-                let lateral = t.curl * L * 0.4 * s * s * (0.6 + 0.4 * sin(w * 0.9 + t.seed)) + L * 0.07 * s * sin(3 * .pi * s - w * 2.4 + t.seed)
-                let rr = start + s * L
-                spine.append((CGPoint(x: c.x + rr * u.0 + lateral * nrm.0, y: c.y + rr * u.1 + lateral * nrm.1),
-                              baseW * pow(1 - s, 1.4) + 1.6))
-            }
-            var left: [CGPoint] = [], right: [CGPoint] = []
-            for k in 0...m {
-                let a0 = spine[max(0, k - 1)].0, a1 = spine[min(m, k + 1)].0
-                var dx = a1.x - a0.x, dy = a1.y - a0.y
-                let len = max(0.001, (dx * dx + dy * dy).squareRoot()); dx /= len; dy /= len
-                let (p, wdt) = spine[k]
-                left.append(CGPoint(x: p.x - dy * wdt / 2, y: p.y + dx * wdt / 2))
-                right.append(CGPoint(x: p.x + dy * wdt / 2, y: p.y - dx * wdt / 2))
-            }
-            path.addPath(smoothClosed(left + right.reversed()))
-            // A small gooey drop at the tip while stretched.
-            if t.ext > 0.6 {
-                let tip = spine[m].0, dr = R * 0.07 * t.ext
-                path.addPath(smoothClosed((0..<12).map { j in
-                    let th = Double(j) / 12 * 2 * .pi
-                    return CGPoint(x: tip.x + dr * cos(th), y: tip.y + dr * sin(th))
-                }))
-            }
-        }
-        return path
-    }
 }
 
 /// Eases every visual parameter toward the current mode's target (state changes take ~250 ms).
 final class OrbDriver {
     struct Frame {
-        var scale = 1.0, amp = 0.0, glow = 0.22, bodyOpacity = 0.92, rings = 0.0
+        var scale = 1.0, glow = 0.22, bodyOpacity = 0.92, rings = 0.0
         var angular = 0.0, dots = 0.0, grey = 0.0, rippleAlpha = 0.0, hold = 0.0, flag = 0.0
-        var flow = 0.0, halo = 0.0, sweep = 0.0
-        var flowPhase = 0.0, haloP = 0.0, sweepAngle = 0.0, liquidPhase = 0.0
-        var tendril = 0.0, busy = 0.0
+        var flow = 0.0, sweep = 0.0
         var flagLang: Lang?
-        var rotation = 0.0, wobblePhase = 0.0, holdAngle = 0.0, flagPhase = 0.0, flagAngle = 0.0
+        var rotation = 0.0, holdAngle = 0.0, flagPhase = 0.0, flagAngle = 0.0, flowPhase = 0.0, sweepAngle = 0.0
         var ripples: [Double] = []
     }
 
     private var last: Double?
     private var cur = Frame()
     private var v: Double = 0
-    private var rotation = 0.0, wobble = 0.0, holdAngle = 0.0, flagPhase = 0.0, flagAngle = -0.5
-    private var flowPhase = 0.0, haloP = 0.0, sweepAngle = -Double.pi / 2, liquidPhase = 0.0
+    private var rotation = 0.0, holdAngle = 0.0, flagPhase = 0.0, flagAngle = -0.5
+    private var flowPhase = 0.0, sweepAngle = -Double.pi / 2
     private var rippleStarts: [Double] = []
     private var lastRipple = 0.0
     private(set) var settled = false
@@ -332,46 +200,34 @@ final class OrbDriver {
         let target = min(1, max(0, raw * 9))
         v += (target - v) * min(1, dt / (target > v ? 0.06 : 0.25))
 
+        // Breathing and level reactions are deliberately small; the inner clouds carry the motion.
         var goal = Frame()
         switch mode {
         case .idle:
-            // Stopped (tap to start): visibly alive, calmer than listening, no rings.
-            goal.scale = reduce ? 1 : 1.0 + 0.03 * sin(2 * .pi * t / 3.6)
-            goal.amp = reduce ? 0.07 : 0.1
-            goal.tendril = 0.75; goal.busy = 0.55
-            goal.glow = reduce ? 0.22 : 0.26 + 0.08 * sin(2 * .pi * t / 3.2)
-            goal.flow = reduce ? 0 : 0.35
+            goal.scale = reduce ? 1 : 1 + 0.012 * sin(2 * .pi * t / 4.0)
+            goal.flow = 0.8
         case .listening:
-            // Ambient motion (time-based) + the real mic level on top. Quiet ≠ frozen, and nothing here reacts
-            // to sound except `v`.
-            goal.scale = reduce ? 1 + 0.06 * v : 1.05 + 0.02 * sin(2 * .pi * t / 2.6) + 0.1 * v
-            goal.amp = reduce ? 0.07 : 0.12 + 0.04 * v
-            goal.tendril = 1; goal.busy = 0.85
-            goal.glow = 0.5; goal.bodyOpacity = 1
-            goal.rings = reduce ? 0 : 0.1 + 0.3 * v
-            goal.flow = reduce ? 0 : 0.45
-            goal.halo = 1
+            goal.scale = reduce ? 1 + 0.04 * v : 1.02 + 0.07 * v
+            goal.glow = 0.42; goal.bodyOpacity = 1
+            goal.rings = reduce ? 0 : 0.08 + 0.3 * v
+            goal.flow = 1
         case .holding:
             goal.scale = 1.0
-            goal.amp = reduce ? 0.05 : 0.07
-            goal.tendril = 0.45; goal.busy = 0.4
             goal.glow = 0.3; goal.bodyOpacity = 1
             goal.hold = 1
-            goal.flow = reduce ? 0 : 0.6
+            goal.flow = 0.8
         case .processing:
-            goal.scale = reduce ? 1.02 : 1.02 + 0.025 * sin(2 * .pi * t / 1.4)
-            goal.amp = reduce ? 0.06 : 0.09
-            goal.tendril = 0.5; goal.busy = 0.9
-            goal.glow = 0.38; goal.bodyOpacity = 1
+            goal.scale = reduce ? 1.01 : 1.01 + 0.01 * sin(2 * .pi * t / 1.4)
+            goal.glow = 0.34; goal.bodyOpacity = 1
             goal.angular = 1; goal.dots = reduce ? 0 : 1
             goal.sweep = 1
-            goal.flow = reduce ? 0 : 0.5
+            goal.flow = 0.75
         case .speaking(let lang):
-            goal.scale = reduce ? 1 + 0.06 * v : 1.05 + 0.15 * v
-            goal.amp = reduce ? 0 : (lang == nil ? 0.015 + 0.06 * v : 0.01 + 0.03 * v)
-            goal.glow = 0.45; goal.bodyOpacity = 1
+            goal.scale = reduce ? 1 + 0.04 * v : 1.03 + 0.08 * v
+            goal.glow = 0.42; goal.bodyOpacity = 1
             goal.rippleAlpha = 1
             goal.flag = lang == nil ? 0 : 1
+            goal.flow = 1
             if let lang { cur.flagLang = lang }
         case .disabled:
             goal.scale = 0.96; goal.glow = 0; goal.bodyOpacity = 1; goal.grey = 1
@@ -379,33 +235,26 @@ final class OrbDriver {
 
         let k = min(1, dt / 0.25)
         func ease(_ a: inout Double, _ b: Double) { a += (b - a) * k }
-        ease(&cur.scale, goal.scale); ease(&cur.amp, goal.amp); ease(&cur.glow, goal.glow)
+        ease(&cur.scale, goal.scale); ease(&cur.glow, goal.glow)
         ease(&cur.bodyOpacity, goal.bodyOpacity); ease(&cur.rings, goal.rings)
         ease(&cur.angular, goal.angular); ease(&cur.dots, goal.dots); ease(&cur.grey, goal.grey)
         ease(&cur.rippleAlpha, goal.rippleAlpha); ease(&cur.hold, goal.hold)
-        ease(&cur.flag, goal.flag)
-        ease(&cur.flow, goal.flow); ease(&cur.halo, goal.halo); ease(&cur.sweep, goal.sweep)
-        ease(&cur.tendril, goal.tendril); ease(&cur.busy, goal.busy)
+        ease(&cur.flag, goal.flag); ease(&cur.flow, goal.flow); ease(&cur.sweep, goal.sweep)
         settled = mode == .disabled && abs(cur.grey - 1) < 0.01 && abs(cur.scale - 0.96) < 0.002
 
         if !reduce {
-            if mode == .processing { rotation += dt * 2 * .pi / 2.4 }
-            if mode != .disabled && mode != .holding { wobble += dt * 1.6 }
+            if mode == .processing { rotation += dt * 2 * .pi / 2.4; sweepAngle += dt * 2 * .pi / 1.4 }
             if mode == .holding { holdAngle += dt * 2 * .pi / 3.0 }
-            // Smooth, slow periods (≥ 1.4 s): no flashing.
-            flowPhase += dt * (mode == .processing ? 1.4 : mode == .listening ? 0.8 : 0.45)
-            if cur.halo > 0.01 { haloP = (haloP + dt / 2.8).truncatingRemainder(dividingBy: 1) }
-            if mode == .processing { sweepAngle += dt * 2 * .pi / 1.4 }
-            // Viscous pace; quiet listening flows a bit faster than stopped, real speech speeds it up a little.
-            let liquidSpeed: Double = switch mode {
-            case .idle: 0.5
-            case .listening: 0.75 + 0.6 * v
-            case .processing: 1.2
-            case .holding: 0.35
-            case .speaking: 0.6
+            // Cloud drift: calm when stopped, livelier while listening/speaking, quickest while connecting.
+            // A steady pace per state — it never follows the mic.
+            let flowSpeed: Double = switch mode {
+            case .idle: 0.55
+            case .listening, .speaking: 0.9
+            case .processing: 1.4
+            case .holding: 0.5
             case .disabled: 0
             }
-            liquidPhase += dt * liquidSpeed
+            flowPhase += dt * flowSpeed
             if case .some(.some(let l)) = speakingLang {
                 if case .korea = l.flag { flagAngle += dt * 2 * .pi / 6.0 }      // turning taegeuk
                 else { flagPhase += dt * 2 * .pi / 1.2; flagAngle += dt * 2 * .pi / 8.0 } // waving bands
@@ -414,14 +263,11 @@ final class OrbDriver {
         }
         rippleStarts.removeAll { t - $0 > 1.4 }
         cur.rotation = rotation
-        cur.wobblePhase = wobble
         cur.holdAngle = holdAngle
         cur.flagPhase = flagPhase
         cur.flagAngle = flagAngle
         cur.flowPhase = flowPhase
-        cur.haloP = haloP
         cur.sweepAngle = sweepAngle
-        cur.liquidPhase = liquidPhase
         cur.ripples = rippleStarts.map { (t - $0) / 1.4 }
         return cur
     }
