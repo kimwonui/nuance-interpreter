@@ -287,7 +287,7 @@ final class InterpreterController: ObservableObject {
                 // Exact: last detected user speech → first released NUA audio. "early" = NUA's audio began while the
                 // speaker was still talking, so the gate waited the longer hold.
                 self.tokens.report(["mode": "live:gated", "direction": dir, "endToFirstSound": dt,
-                                    "route": LiveSession.gatedDevice.diagnostics + (early ? " early" : "")])
+                                    "route": LiveSession.gatedDevice.diagnosticsShort + (early ? " early" : "")])
             }
             s.start { [weak self] offer in
                 guard let self else { throw CancellationError() }
@@ -344,6 +344,8 @@ final class InterpreterController: ObservableObject {
             }
         case .closed(let usage):
             tokens.report(["mode": "live:closed", "speechSec": usage ?? -1])
+            // Closed by OpenAI: still tear the connection down, or it keeps the mic and audio engine running.
+            live?.stop()
             live = nil
             liveStarted = false
             autoState = .off

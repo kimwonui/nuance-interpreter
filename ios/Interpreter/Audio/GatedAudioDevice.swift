@@ -47,7 +47,9 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     private var holdingReported = false
 
     private weak var adm: RTCAudioDeviceDelegate?
-    private let engine = AVAudioEngine()
+    /// Rebuilt from scratch whenever WebRTC restarts audio after a full stop, so every session's audio path is
+    /// set up exactly like the first one (Stop → Start used to leave the second session without audio).
+    private var engine = AVAudioEngine()
     private var source: AVAudioSourceNode?
     private var converter: AVAudioConverter?
     private let pcm16 = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: GatedAudioDevice.rate, channels: 1, interleaved: true)!
@@ -96,6 +98,9 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     private var recTime: Double = 0
     private var levelTick: Double = 0
     private var lastMic: Float = 0
+    /// Samples seen since the last reset (diagnostics: proves the mic and playout are actually running).
+    private var micSamples = 0
+    private var renderSamples = 0
 
     private(set) var isInitialized = false
     private(set) var isPlayoutInitialized = false
@@ -130,6 +135,8 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         pausedAt = 0
         turnPlayed = 0
         turnSkipped = 0
+        micSamples = 0
+        renderSamples = 0
         os_unfair_lock_unlock(&lock)
         holdingReported = false
     }
@@ -161,6 +168,7 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
 
     private func setup() -> Bool {
         if source != nil { return true }
+        engine = AVAudioEngine()
         configureSession()
         do { try engine.inputNode.setVoiceProcessingEnabled(true) } catch { log.error("voice processing: \(error.localizedDescription, privacy: .public)") }
         let node = AVAudioSourceNode(format: floatFormat) { [unowned self] _, _, frameCount, abl -> OSStatus in
@@ -181,6 +189,8 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     }
 
     private func startEngine() -> Bool {
+        // WebRTC calls start again after a full stop without re-initializing, so rebuild here if needed.
+        guard setup() else { return false }
         if engine.isRunning { return true }
         configureSession() // push-to-talk may have changed the session in between
         do {
@@ -193,15 +203,23 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         }
     }
 
+    /// Both directions stopped (Stop / session ended): release the mic completely and drop the engine, so the
+    /// next start builds a fresh one instead of restarting a stopped voice-processing engine.
     private func stopEngineIfIdle() {
-        guard !isPlaying, !isRecording, engine.isRunning else { return }
-        engine.stop()
+        guard !isPlaying, !isRecording, source != nil else { return }
+        releaseEngine()
     }
 
-    private func teardown() {
+    private func releaseEngine() {
+        engine.stop()
         engine.inputNode.removeTap(onBus: 0)
         if let source { engine.detach(source) }
         source = nil
+        converter = nil
+    }
+
+    private func teardown() {
+        if source != nil { releaseEngine() }
         os_unfair_lock_lock(&lock); ring.clear(); releasing = false; os_unfair_lock_unlock(&lock)
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
@@ -222,8 +240,17 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     /// If playback is on the earpiece, switch to the built-in speaker (headphones/Bluetooth untouched).
     /// Diagnostics: is Apple voice processing really on, and the current noise floor.
     var diagnostics: String {
+        os_unfair_lock_lock(&lock); let nf = noiseFloor; let m = micSamples; let r = renderSamples; os_unfair_lock_unlock(&lock)
+        guard source != nil else { return String(format: "no engine nf %.3f", nf) }
+        // "mic/out" = seconds of mic input and playout pulled since the session started (0 = not running).
+        return String(format: "vp %@ nf %.3f mic %.1f out %.1f", engine.inputNode.isVoiceProcessingEnabled ? "on" : "off", nf,
+                      Double(m) / Self.rate, Double(r) / Self.rate)
+    }
+
+    /// Short form for per-turn metrics (the server keeps 40 characters).
+    var diagnosticsShort: String {
         os_unfair_lock_lock(&lock); let nf = noiseFloor; os_unfair_lock_unlock(&lock)
-        return String(format: "vp %@ nf %.3f", engine.inputNode.isVoiceProcessingEnabled ? "on" : "off", nf)
+        return String(format: "vp %@ nf %.3f", source != nil && engine.inputNode.isVoiceProcessingEnabled ? "on" : "off", nf)
     }
 
     func ensureSpeaker() {
@@ -254,6 +281,7 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         lastMic = rms
         detectSpeech(rms: rms, frames: n)
         os_unfair_lock_lock(&lock)
+        micSamples += n
         // Paused by the user's voice: keep the model muted until it's a confirmed cut-in, so a false alarm
         // (e.g. NUA's own echo) never reaches the model.
         let suppress = CFAbsoluteTimeGetCurrent() < suppressUntil || pausedAt > 0
@@ -380,6 +408,7 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         var turnDone: (Double, Double)?
         var outSum: Float = 0
         os_unfair_lock_lock(&lock)
+        renderSamples += count
         // Queue NUA's speech with its own pauses (each up to `maxGap`), whether holding or playing a backlog:
         // skipping silence to drain a backlog squeezed the gaps between words and phrases and made NUA sound
         // rushed. Leading silence is not queued (latency, not rhythm); when caught up, silence plays as is.
