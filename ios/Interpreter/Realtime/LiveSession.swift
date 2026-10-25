@@ -23,6 +23,7 @@ final class LiveSession: NSObject {
     /// Hold-until-pause mode: seconds from the user's last speech to NUA's first released audio.
     var onRelease: ((Double, Bool) -> Void)?
     var onHoldChange: ((Bool) -> Void)?
+    var onPlayingChange: ((Bool) -> Void)?
     var onCutIn: ((Float, Float) -> Void)?
     var onUserVoice: (() -> Void)?
     var onDroppedUnprompted: ((Double) -> Void)?
@@ -67,6 +68,7 @@ final class LiveSession: NSObject {
             device.onLevels = { [weak self] i, o in Task { @MainActor in self?.onLevels?(i, o) } }
             device.onRelease = { [weak self] dt, early in Task { @MainActor in self?.onRelease?(dt, early) } }
             device.onHoldChange = { [weak self] h in Task { @MainActor in self?.onHoldChange?(h) } }
+            device.onPlayingChange = { [weak self] p in Task { @MainActor in self?.onPlayingChange?(p) } }
             device.onCutIn = { [weak self] m, o in Task { @MainActor in self?.onCutIn?(m, o) } }
             device.onUserVoice = { [weak self] in Task { @MainActor in self?.onUserVoice?() } }
             device.onDroppedUnprompted = { [weak self] sec in Task { @MainActor in self?.onDroppedUnprompted?(sec) } }
@@ -148,6 +150,7 @@ final class LiveSession: NSObject {
                 Self.gatedDevice.onLevels = nil
                 Self.gatedDevice.onRelease = nil
                 Self.gatedDevice.onHoldChange = nil
+                Self.gatedDevice.onPlayingChange = nil
                 Self.gatedDevice.onCutIn = nil
                 Self.gatedDevice.onUserVoice = nil
                 Self.gatedDevice.onDroppedUnprompted = nil

@@ -34,6 +34,9 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     var onRelease: ((Double, Bool) -> Void)?
     /// true while NUA's voice is buffered and waiting for the user's pause (real gate state, not a timer).
     var onHoldChange: ((Bool) -> Void)?
+    /// NUA's turn is playing (true from release until the turn really ends: pauses inside the translation
+    /// shorter than `turnGap` don't end it; a cut-in, a voice pause, Stop or a discard do).
+    var onPlayingChange: ((Bool) -> Void)?
     /// A cut-in stopped NUA: mic level and NUA's playing level at that moment (diagnostics).
     var onCutIn: ((Float, Float) -> Void)?
     /// The phone detected the user (or the other person) starting to speak.
@@ -45,6 +48,7 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     /// A NUA turn finished playing: seconds of audio played (with its pauses), seconds of over-long silence skipped.
     var onTurnPlayed: ((Double, Double) -> Void)?
     private var holdingReported = false
+    private var playingReported = false
 
     private weak var adm: RTCAudioDeviceDelegate?
     /// Rebuilt from scratch whenever WebRTC restarts audio after a full stop, so every session's audio path is
@@ -192,6 +196,7 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         renderSamples = 0
         os_unfair_lock_unlock(&lock)
         holdingReported = false
+        playingReported = false
     }
 
     /// Stop NUA now and drop its queued and still-arriving audio until someone speaks again (one-way mode, when
@@ -549,6 +554,7 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
             chimePos += k
         }
         let holdingNow = !releasing && !ring.isEmpty
+        let playingNow = releasing
         os_unfair_lock_unlock(&lock)
         if count < n { for i in count..<n { dst[i] = 0 } }
 
@@ -558,6 +564,10 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         if holdingNow != holdingReported {
             holdingReported = holdingNow
             onHoldChange?(holdingNow)
+        }
+        if playingNow != playingReported {
+            playingReported = playingNow
+            onPlayingChange?(playingNow)
         }
         if now - levelTick > 0.1 {
             levelTick = now

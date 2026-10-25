@@ -195,6 +195,7 @@ struct Turn: Identifiable {
     var outputAudio = Data()  // 다시 듣기용
     var playedBytes = 0       // 말하는 동안 보류했다가 재생한 위치
     var voicedStarted = false // output speech has begun (leading padding silence is skipped)
+    var outputLangConfirmed = false // GPT-Live: `target` was confirmed from the output text; fixed for the turn
     var pendingSilence = Data() // silence after speech, played only if more speech follows
     var metrics = TurnMetrics()
     let createdAt = Date()

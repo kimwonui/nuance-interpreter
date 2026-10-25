@@ -135,6 +135,8 @@ final class InterpreterController: ObservableObject {
     private var live: LiveSession?
     private var liveInput = ""          // source transcript since the last interpretation
     private var liveOneWay = false      // the running session's direction (fixed at Start)
+    private var liveNuaPlaying = false  // pause gate: NUA's turn is playing (real playback state, not the level)
+    private var liveLastOutLoud: Double = 0 // no gate: last time the output level was audible
     private var liveSessionTurnID: UUID?
     private var liveLastOut: Double = 0
     private var liveLastLoudIn: Double = 0
@@ -278,6 +280,8 @@ final class InterpreterController: ObservableObject {
             liveSessionTurnID = nil
             liveStarted = false
             liveOneWay = isOneWay
+            liveNuaPlaying = false
+            liveLastOutLoud = 0
             // Two-way: ding when NUA finishes a translation so the other person knows to answer.
             LiveSession.gatedDevice.setTurnEndChime(!liveOneWay)
             let s = LiveSession(waitForPause: waitForPause)
@@ -286,6 +290,7 @@ final class InterpreterController: ObservableObject {
             s.onEvent = { [weak self, weak s] e in guard let self, let s, self.live === s else { return }; self.liveEvent(e) }
             s.onLevels = { [weak self, weak s] i, o in guard let self, let s, self.live === s else { return }; self.liveLevels(i, o) }
             s.onHoldChange = { [weak self, weak s] h in guard let self, let s, self.live === s else { return }; self.liveHolding = h }
+            s.onPlayingChange = { [weak self, weak s] p in guard let self, let s, self.live === s else { return }; self.liveNuaPlaying = p }
             s.onUserVoice = { [weak self, weak s] in
                 guard let self, let s, self.live === s else { return }
                 self.liveUserVoiceAt = CFAbsoluteTimeGetCurrent()
@@ -366,8 +371,8 @@ final class InterpreterController: ObservableObject {
             liveLastOut = now
             if let id = liveSessionTurnID {
                 update(id) { $0.targetText += d }
-                if liveOneWay, let t = turns.first(where: { $0.id == id }), t.targetText.count >= 12,
-                   Lang.detect(t.targetText, among: (leftLang, rightLang)) == leftLang {
+                let detected = turns.first(where: { $0.id == id }).flatMap { Lang.detect($0.targetText, among: (leftLang, rightLang)) }
+                if liveOneWay, let t = turns.first(where: { $0.id == id }), t.targetText.count >= 12, detected == leftLang {
                     // One-way safety net: NUA is speaking my language, i.e. it translated (or answered) the other
                     // person. Cut that audio and drop the turn; the gate stays closed until someone speaks again.
                     LiveSession.gatedDevice.discardUntilVoice()
@@ -376,9 +381,15 @@ final class InterpreterController: ObservableObject {
                     tokens.report(["mode": "live:wrong-dir"])
                     return
                 }
-                // Fix the direction once the output text shows its language (two-way only).
-                if !liveOneWay, let t = turns.first(where: { $0.id == id }), let outLang = Lang.detect(t.targetText, among: (leftLang, rightLang)), outLang != t.target {
-                    update(id) { $0.target = outLang; $0.source = outLang == self.leftLang ? self.rightLang : self.leftLang }
+                // Confirm the output language once the text shows it, then keep it for the whole turn (no flipping
+                // back and forth as the text grows). Until then the orb shows no flag.
+                if let outLang = detected, let t = turns.first(where: { $0.id == id }), !t.outputLangConfirmed,
+                   !liveOneWay || outLang == rightLang {
+                    update(id) {
+                        $0.target = outLang
+                        $0.source = outLang == self.leftLang ? self.rightLang : self.leftLang
+                        $0.outputLangConfirmed = true
+                    }
                 }
             }
         case .closed(let usage):
@@ -415,7 +426,11 @@ final class InterpreterController: ObservableObject {
         level = autoState == .muted ? 0 : input
         outputLevel = output
         if input > 0.03 && autoState != .muted { liveLastLoudIn = now; liveFirstSoundPending = true }
-        let speakingNow = output > 0.02
+        // "Speaking" = NUA's turn is playing, from the gate's real playback state — not the instantaneous level,
+        // which dips between words and at every pause inside a translation and made the orb and flags flicker.
+        // Without the gate, the level with a 0.6 s hangover.
+        if output > 0.02 { liveLastOutLoud = now }
+        let speakingNow = waitForPause ? liveNuaPlaying : now - liveLastOutLoud < 0.6
         if speakingNow && !liveOutputOn { live?.ensureSpeaker() }
         if speakingNow && !liveOutputOn && liveFirstSoundPending && !waitForPause {
             liveFirstSoundPending = false
@@ -449,7 +464,7 @@ final class InterpreterController: ObservableObject {
     var speakingLanguage: Lang? {
         guard let id = playingTurnID ?? (autoState == .speaking ? turns.last?.id : nil),
               let t = turns.first(where: { $0.id == id }) else { return nil }
-        if live != nil { return Lang.detect(t.targetText, among: (leftLang, rightLang)) }
+        if live != nil { return t.outputLangConfirmed ? t.target : nil } // confirmed once per turn, then stable
         return t.target
     }
 
