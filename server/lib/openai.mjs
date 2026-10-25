@@ -5,8 +5,8 @@ export const MODEL = 'gpt-realtime-translate';
 export const TRANSCRIBE_MODEL = 'gpt-realtime-whisper';
 export const TRANSLATE_WS_URL = `wss://api.openai.com/v1/realtime/translations?model=${MODEL}`;
 
-// Output languages documented for gpt-realtime-translate (13). LANGUAGES in lib/live.mjs adds Arabic
-// (GPT-Live only), which this model can hear but not speak — so it is deliberately not a target here.
+// Output languages documented for gpt-realtime-translate (13). LANGUAGES in lib/live.mjs adds Arabic and
+// Gujarati (GPT-Live only), which this model can hear but not speak — so they are deliberately not targets here.
 export const SUPPORTED_TARGETS = new Set(['en', 'ko', 'ja', 'zh', 'es', 'fr', 'de', 'it', 'pt', 'ru', 'hi', 'id', 'vi']);
 
 // Source-language captions (gpt-realtime-whisper) are off by default: on low usage tiers they

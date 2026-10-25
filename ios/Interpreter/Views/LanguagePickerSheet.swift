@@ -68,7 +68,7 @@ struct LanguagePickerSheet: View {
     }
 
     private var footnote: String {
-        var text = "OpenAI does not publish a language list for GPT-Live. Only Korean and English have been tried; the others are experimental and not tested. Arabic works only with GPT-Live: the backup interpreter model can hear Arabic but can't speak it. Picking the other person's language swaps the two."
+        var text = "OpenAI does not publish a language list for GPT-Live. Only Korean and English have been tried; the others are experimental and not tested. Arabic and Gujarati work only with GPT-Live: the backup interpreter model can hear them but can't speak them. Picking the other person's language swaps the two."
         if controller.availableLangs.count <= 2 {
             text += " More languages appear after the NUA server update is installed."
         }
