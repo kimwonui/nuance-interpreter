@@ -31,6 +31,7 @@ final class LiveSession: NSObject {
     private var micTrack: RTCAudioTrack?
     private var statsTimer: Timer?
     private var closing = false
+    private var routeObserver: NSObjectProtocol?
     private let log = Logger(subsystem: "interp", category: "live")
 
     /// `exchange` posts our SDP offer to the server and returns OpenAI's SDP answer.
@@ -60,6 +61,9 @@ final class LiveSession: NSObject {
                     let answer = try await exchange(offer.sdp)
                     try await pc.setRemoteDescription(RTCSessionDescription(type: .answer, sdp: answer))
                     self.startStats()
+                    // WebRTC starts its audio unit after negotiation; re-check the route once it has.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.ensureSpeaker() }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.ensureSpeaker() }
                 } catch {
                     self.fail(error.localizedDescription)
                 }
@@ -81,6 +85,8 @@ final class LiveSession: NSObject {
     }
 
     private func teardown() {
+        if let routeObserver { NotificationCenter.default.removeObserver(routeObserver) }
+        routeObserver = nil
         statsTimer?.invalidate()
         statsTimer = nil
         channel?.close()
@@ -102,9 +108,17 @@ final class LiveSession: NSObject {
     }
 
     private func configureAudioSession() {
+        // WebRTC re-applies its own default configuration when its audio unit starts. That default has no
+        // .defaultToSpeaker, so in voiceChat mode playback went to the earpiece (owner heard nothing,
+        // 2026-10-24). Set WebRTC's default itself, then make sure the built-in speaker is used.
+        let cfg = RTCAudioSessionConfiguration.webRTC()
+        cfg.category = AVAudioSession.Category.playAndRecord.rawValue
+        cfg.mode = AVAudioSession.Mode.voiceChat.rawValue
+        cfg.categoryOptions = [.defaultToSpeaker, .allowBluetoothHFP]
+        RTCAudioSessionConfiguration.setWebRTC(cfg)
+
         let s = RTCAudioSession.sharedInstance()
         s.lockForConfiguration()
-        defer { s.unlockForConfiguration() }
         do {
             // voiceChat mode = Apple voice processing (echo cancellation); speaker by default, Bluetooth allowed.
             try s.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
@@ -112,6 +126,23 @@ final class LiveSession: NSObject {
         } catch {
             log.error("audio session: \(error.localizedDescription, privacy: .public)")
         }
+        s.unlockForConfiguration()
+        ensureSpeaker()
+        if routeObserver == nil {
+            routeObserver = NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.ensureSpeaker() }
+            }
+        }
+    }
+
+    /// If playback is on the earpiece, switch to the built-in speaker (headphones/Bluetooth are left alone).
+    func ensureSpeaker() {
+        let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
+        guard outputs.contains(where: { $0.portType == .builtInReceiver }) else { return }
+        let s = RTCAudioSession.sharedInstance()
+        s.lockForConfiguration()
+        do { try s.overrideOutputAudioPort(.speaker) } catch { log.error("speaker override: \(error.localizedDescription, privacy: .public)") }
+        s.unlockForConfiguration()
     }
 
     private func send(_ obj: [String: Any]) {

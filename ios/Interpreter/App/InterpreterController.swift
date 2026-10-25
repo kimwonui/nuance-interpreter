@@ -213,6 +213,7 @@ final class InterpreterController: ObservableObject {
         case .started:
             liveStarted = true
             autoState = .waiting
+            tokens.report(["mode": "live:started", "route": AudioIO.routeName()])
         case .inputText(let d):
             // New source speech after an interpretation finished starts a new turn.
             if liveSessionTurnID != nil, now - liveLastOut > 1.5 { liveSessionTurnID = nil; liveInput = "" }
@@ -267,6 +268,7 @@ final class InterpreterController: ObservableObject {
         outputLevel = output
         if input > 0.03 && autoState != .muted { liveLastLoudIn = now; liveFirstSoundPending = true }
         let speakingNow = output > 0.02
+        if speakingNow && !liveOutputOn { live?.ensureSpeaker() }
         if speakingNow && !liveOutputOn && liveFirstSoundPending {
             liveFirstSoundPending = false
             let gap = now - liveLastLoudIn
@@ -274,7 +276,7 @@ final class InterpreterController: ObservableObject {
                 let dir = turns.last.map { "\($0.source.code)→\($0.target.code)" } ?? "?"
                 if let id = liveSessionTurnID { update(id) { $0.metrics.tPlaybackStart = now } }
                 latency.append(LatencySample(direction: dir, speechSec: 0, endToFirstSound: gap, endToClosed: nil))
-                tokens.report(["mode": "live", "direction": dir, "endToFirstSound": gap])
+                tokens.report(["mode": "live", "direction": dir, "endToFirstSound": gap, "route": AudioIO.routeName()])
             }
         }
         liveOutputOn = speakingNow
