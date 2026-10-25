@@ -60,7 +60,7 @@ const METRIC_NUMBERS = ['speechSec', 'prepMs', 'endToFirstSound', 'endToFirstVoi
 export function cleanMetrics(body) {
   const out = {};
   for (const k of METRIC_NUMBERS) if (typeof body?.[k] === 'number' && Number.isFinite(body[k])) out[k] = Math.round(body[k] * 1000) / 1000;
-  if (/^(KO|EN)→(KO|EN)$/.test(body?.direction || '')) out.direction = body.direction;
+  if (/^[A-Z]{2}→[A-Z]{2}$/.test(body?.direction || '')) out.direction = body.direction;
   if (typeof body?.prewarmed === 'boolean') out.prewarmed = body.prewarmed;
   if (typeof body?.route === 'string') out.route = body.route.slice(0, 40);
   if (typeof body?.mode === 'string') out.mode = body.mode.slice(0, 20);

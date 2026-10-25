@@ -16,7 +16,9 @@ import os
 final class GatedAudioDevice: NSObject, RTCAudioDevice {
     static let rate: Double = 48_000
 
-    var holdSeconds: Double = 0.5
+    /// Owner's latest priority is near-instant output: a short guard so NUA doesn't start while the speaker is
+    /// mid-word, not a full pause rule (was 0.5 s).
+    var holdSeconds: Double = 0.2
     /// Mic level and the level of audio actually played (called at ~10 Hz on audio threads).
     var onLevels: ((Float, Float) -> Void)?
     /// Seconds from the user's last speech to the first released NUA audio of a turn.
@@ -272,7 +274,9 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         // tolerated (leaky count) instead of resetting, so real speech isn't missed between syllables.
         let needed = Int(Self.rate * (playing ? 0.35 : 0.15))
         if rms > threshold {
-            voiceRun += frames
+            // Bounded: the count only needs to reach `needed`; unbounded growth kept "still talking" alive for
+            // seconds after the speaker stopped (≈2 s per 1 s of speech) and delayed every translation.
+            voiceRun = min(voiceRun + frames, needed * 2)
         } else {
             voiceRun = max(0, voiceRun - frames / 2)
             // Learn the room's noise only from clearly non-speech sound, so quiet speech is never learned as noise.
@@ -281,7 +285,8 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         var cutIn: (Float, Float)?
         var newVoice = false
         if voiceRun >= needed {
-            lastVoice = now
+            // "Last speech" = an actually voiced moment, not the tail of the counter.
+            if rms > threshold { lastVoice = now }
             if !voiceSinceTurn { voiceSinceTurn = true; newVoice = true }
             if playing {
                 cutIn = (rms, outLevel)
