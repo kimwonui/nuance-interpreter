@@ -102,6 +102,12 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     private static let heardChime = tones([(1318.5, 0)], length: 0.2, amp: 0.12)
     private var chime: [Float] = []
     private var chimePos = 0
+    /// Ding when the next turn is released (set by the controller only when the speaking language changed).
+    private var dingArmed = false
+
+    func armHeardChime(_ on: Bool) {
+        os_unfair_lock_lock(&lock); dingArmed = on; os_unfair_lock_unlock(&lock)
+    }
     private var chimeUntil: Double = 0 // speech detection ignores the mic until then (chime + echo tail)
 
     func playChime(_ c: Chime) {
@@ -172,6 +178,7 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         chime = []
         chimePos = 0
         chimeUntil = 0
+        dingArmed = false
         earlyAudio = false
         pausedAt = 0
         discarding = false
@@ -502,7 +509,8 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
                 if now - lastReleaseEnd > 1.0 {
                     released = quietFor
                     releasedEarly = wasEarly
-                    startChimeLocked(.heard) // "heard you": NUA starts interpreting this turn
+                    // "Heard you": only when the speaking language changed since the last turn (armed by the controller).
+                    if dingArmed { startChimeLocked(.heard); dingArmed = false }
                 }
             }
         } else if !releasing, !ring.isEmpty, !voiceSinceTurn, !continuation, now - heldSince > 1.5 {
