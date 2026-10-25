@@ -62,8 +62,8 @@ struct TurnMetrics {
 /// 발화 한 번. 음성(원문·번역)은 메모리에만 있고 앱이 종료되면 사라진다.
 struct Turn: Identifiable {
     let id = UUID()
-    let source: Lang
-    let target: Lang
+    var source: Lang
+    var target: Lang
     var sourceText = ""
     var targetText = ""
     var status: TurnStatus = .connecting

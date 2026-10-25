@@ -4,6 +4,10 @@ options:
   deploymentTarget:
     iOS: "17.0"
   createIntermediateGroups: true
+packages:
+  WebRTC:
+    url: https://github.com/stasel/WebRTC
+    exactVersion: 154.0.0
 configFiles:
   Debug: Interpreter/Config/App.xcconfig
   Release: Interpreter/Config/App.xcconfig
@@ -11,6 +15,8 @@ targets:
   Interpreter:
     type: application
     platform: iOS
+    dependencies:
+      - package: WebRTC
     sources:
       - path: Interpreter
         excludes:

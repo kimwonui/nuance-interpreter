@@ -59,6 +59,26 @@ final class TokenClient {
         return try JSONDecoder().decode(SessionTicket.self, from: data)
     }
 
+    /// Hands-free GPT-Live: sends the phone's WebRTC offer, returns OpenAI's answer (server creates the session).
+    func liveAnswer(offer: String) async throws -> String {
+        guard let baseURL else { throw TicketError.notConfigured }
+        var req = URLRequest(url: baseURL.appendingPathComponent("api/live"))
+        req.httpMethod = "POST"
+        req.timeoutInterval = 12
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let appKey { req.setValue(appKey, forHTTPHeaderField: "X-App-Key") }
+        req.httpBody = try JSONSerialization.data(withJSONObject: ["sdp": offer])
+        let data: Data
+        let resp: URLResponse
+        do { (data, resp) = try await URLSession.shared.data(for: req) } catch { throw TicketError.network(error.localizedDescription) }
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        guard code == 200, let sdp = obj?["sdp"] as? String else {
+            throw TicketError.server(code, obj?["error"] as? String ?? "unknown")
+        }
+        return sdp
+    }
+
     /// Development builds only: send latency numbers (never speech content) to the server log.
     func report(_ metrics: [String: Any]) {
         #if DEBUG

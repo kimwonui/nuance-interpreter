@@ -18,6 +18,8 @@ final class InterpreterController: ObservableObject {
     /// auto = hands-free (default): one Start, NUA detects Korean/English and interprets each utterance.
     /// manual = push-to-talk: tap your language, speak, tap Done.
     enum Mode: String { case auto, manual }
+    /// Hands-free engine: live = GPT-Live over WebRTC (default); translate = two gpt-realtime-translate sessions.
+    enum Engine: String { case live, translate }
 
     struct LatencySample {
         let direction: String
@@ -47,6 +49,13 @@ final class InterpreterController: ObservableObject {
         }
     }
     @Published private(set) var autoState: AutoConversation.State = .off
+    @Published var engine: Engine = Engine(rawValue: UserDefaults.standard.string(forKey: "handsFreeEngine") ?? "") ?? .live {
+        didSet {
+            UserDefaults.standard.set(engine.rawValue, forKey: "handsFreeEngine")
+            if autoState != .off { stopConversation() }
+        }
+    }
+    @Published private(set) var engineNote: String?
 
     var serverDescription: String { tokens.serverDescription }
 
@@ -72,6 +81,14 @@ final class InterpreterController: ObservableObject {
     private var replayingID: UUID?
     private var running = false
     private var autoEngine: AutoConversation!
+    private var live: LiveSession?
+    private var liveInput = ""          // source transcript since the last interpretation
+    private var liveSessionTurnID: UUID?
+    private var liveLastOut: Double = 0
+    private var liveLastLoudIn: Double = 0
+    private var liveOutputOn = false
+    private var liveFirstSoundPending = false
+    private var liveStarted = false
     private let log = Logger(subsystem: "interp", category: "latency")
 
     init() {
@@ -97,9 +114,14 @@ final class InterpreterController: ObservableObject {
 
     // MARK: Hands-free
 
-    /// Starts the mic and the two interpretation sessions. Only called from the Start button.
+    /// Starts listening. Only called from the Start button.
     func startConversation() {
         guard autoState == .off else { return }
+        if engine == .live { startLive(); return }
+        startTranslateEngine()
+    }
+
+    private func startTranslateEngine() {
         Task {
             mic = await Self.micPermission(request: true)
             guard mic == .granted else { return }
@@ -119,6 +141,16 @@ final class InterpreterController: ObservableObject {
 
     /// Stops listening completely: sessions closed, mic engine stopped (iOS mic indicator goes off).
     func stopConversation() {
+        if let live {
+            live.stop()
+            self.live = nil
+            liveStarted = false
+            autoState = .off
+            playingTurnID = nil
+            level = 0
+            outputLevel = 0
+            return
+        }
         autoEngine.stop()
         audio.endCapture()
         audio.onMicChunk = nil
@@ -130,6 +162,13 @@ final class InterpreterController: ObservableObject {
 
     /// Mute turns the mic engine off but keeps the sessions; Unmute turns it back on.
     func toggleMute() {
+        if let live {
+            let mute = autoState != .muted
+            live.setMuted(mute)
+            autoState = mute ? .muted : .waiting
+            if mute { level = 0 }
+            return
+        }
         if autoState == .muted {
             do { try audio.start(voiceProcessing: true); running = true } catch { connectionError = "Couldn't start audio: \(error.localizedDescription)"; return }
             audio.onMicChunk = { [weak self] chunk in DispatchQueue.main.async { self?.autoEngine.mic(chunk) } }
@@ -141,6 +180,112 @@ final class InterpreterController: ObservableObject {
             audio.stop()
             running = false
             level = 0
+        }
+    }
+
+    // MARK: Hands-free · GPT-Live
+
+    private func startLive() {
+        Task {
+            mic = await Self.micPermission(request: true)
+            guard mic == .granted else { return }
+            if running { audio.stop(); running = false } // WebRTC owns the audio session in this mode
+            connectionError = nil
+            engineNote = nil
+            autoState = .connecting
+            liveInput = ""
+            liveSessionTurnID = nil
+            liveStarted = false
+            let s = LiveSession()
+            live = s
+            s.onEvent = { [weak self] e in self?.liveEvent(e) }
+            s.onLevels = { [weak self] i, o in self?.liveLevels(i, o) }
+            s.start { [weak self] offer in
+                guard let self else { throw CancellationError() }
+                return try await self.tokens.liveAnswer(offer: offer)
+            }
+        }
+    }
+
+    private func liveEvent(_ e: LiveSession.Event) {
+        let now = CFAbsoluteTimeGetCurrent()
+        switch e {
+        case .started:
+            liveStarted = true
+            autoState = .waiting
+        case .inputText(let d):
+            // New source speech after an interpretation finished starts a new turn.
+            if liveSessionTurnID != nil, now - liveLastOut > 1.5 { liveSessionTurnID = nil; liveInput = "" }
+            liveInput += d
+            if let id = liveSessionTurnID { update(id) { $0.sourceText += d } }
+        case .outputText(let d):
+            if liveSessionTurnID == nil || now - liveLastOut > 1.5 {
+                let src = AutoConversation.language(of: liveInput) ?? AutoConversation.language(of: d).map { $0 == .ko ? .en : .ko } ?? .ko
+                var t = Turn(source: src, target: src == .ko ? .en : .ko)
+                t.status = .playing
+                t.sourceText = liveInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                t.metrics.tStop = liveLastLoudIn
+                turns.append(t)
+                liveSessionTurnID = t.id
+                liveInput = ""
+            }
+            liveLastOut = now
+            if let id = liveSessionTurnID {
+                update(id) { $0.targetText += d }
+                // Fix the direction once the output text shows its language.
+                if let t = turns.first(where: { $0.id == id }), let outLang = AutoConversation.language(of: t.targetText), outLang != t.target {
+                    update(id) { $0.target = outLang; $0.source = outLang == .ko ? .en : .ko }
+                }
+            }
+        case .closed(let usage):
+            tokens.report(["mode": "live:closed", "speechSec": usage ?? -1])
+            live = nil
+            liveStarted = false
+            autoState = .off
+        case .failed(let msg):
+            let wasStarting = !liveStarted
+            live?.stop()
+            live = nil
+            liveStarted = false
+            autoState = .off
+            tokens.report(["mode": "live:failed", "route": String(msg.prefix(40))])
+            if wasStarting {
+                // Live couldn't start (e.g. server not updated yet): fall back to the interpreter model.
+                engineNote = "GPT-Live unavailable (\(msg.prefix(60))). Using the interpreter model."
+                startTranslateEngine()
+            } else {
+                connectionError = msg
+            }
+        }
+    }
+
+    /// Orb levels + state from WebRTC stats. Latency here is approximate: audio levels are sampled every 0.1 s.
+    private func liveLevels(_ input: Float, _ output: Float) {
+        guard live != nil else { return }
+        let now = CFAbsoluteTimeGetCurrent()
+        level = autoState == .muted ? 0 : input
+        outputLevel = output
+        if input > 0.03 && autoState != .muted { liveLastLoudIn = now; liveFirstSoundPending = true }
+        let speakingNow = output > 0.02
+        if speakingNow && !liveOutputOn && liveFirstSoundPending {
+            liveFirstSoundPending = false
+            let gap = now - liveLastLoudIn
+            if gap < 10 {
+                let dir = turns.last.map { "\($0.source.code)→\($0.target.code)" } ?? "?"
+                if let id = liveSessionTurnID { update(id) { $0.metrics.tPlaybackStart = now } }
+                latency.append(LatencySample(direction: dir, speechSec: 0, endToFirstSound: gap, endToClosed: nil))
+                tokens.report(["mode": "live", "direction": dir, "endToFirstSound": gap])
+            }
+        }
+        liveOutputOn = speakingNow
+        guard liveStarted, autoState != .muted else { return }
+        if speakingNow {
+            autoState = .speaking
+            playingTurnID = liveSessionTurnID
+        } else {
+            playingTurnID = nil
+            if let id = liveSessionTurnID, now - liveLastOut > 1.5 { update(id) { if $0.status == .playing { $0.status = .done } } }
+            autoState = input > 0.03 ? .hearing : .waiting
         }
     }
 

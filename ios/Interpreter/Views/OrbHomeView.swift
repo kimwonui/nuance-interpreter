@@ -100,6 +100,14 @@ struct OrbHomeView: View {
 
     @ViewBuilder
     private var statusAccessory: some View {
+        if let note = controller.engineNote, controller.autoState != .off {
+            Text(note)
+                .font(.noto(11, .regular))
+                .foregroundStyle(Theme.textSecondary)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .padding(.horizontal, 24)
+        }
         if controller.mic == .denied {
             Button {
                 if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }

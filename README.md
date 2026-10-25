@@ -34,6 +34,12 @@ docs/test-sentences.json negation, questions, sarcasm, honorifics, casual speech
 
 ## Hands-free mode (default)
 
+### Hands-free engines
+
+- **GPT-Live (default)** — `gpt-live-1`, OpenAI's full-duplex voice model for natural conversation with built-in turn-taking and interruptions ($0.05 per minute of open session, billed per second). There are no client secrets for Live, so the phone sends its WebRTC offer to `POST /api/live`; the server creates the session with the API key and **fixed interpreter instructions** (adapted from OpenAI's translation-only Live prompt, extended to Korean↔English) and returns the answer. Audio then flows directly between the phone and OpenAI; WebRTC provides echo cancellation. Uses Google WebRTC via the `stasel/WebRTC` Swift package (154.0.0). The API model is `gpt-live-1`; it is not claimed to be identical to the ChatGPT Live app.
+- **Interpreter model** — the two-session `gpt-realtime-translate` design below. Used automatically if a Live session can't start.
+
+
 1. Tap **Start conversation** — this is the only thing that turns the mic on (nothing records at launch). The iOS mic indicator shows the real state; **Mute** turns the mic engine off, **Stop** ends everything.
 2. NUA keeps two interpretation sessions open (→English and →Korean) and listens with a local voice detector. Audio is sent only while someone speaks (0.5 s pre-roll so the first syllable isn't lost, 1.5 s tail), never during silence.
 3. The →English session also returns the source transcript (`gpt-4o-mini-transcribe`, enabled from the client). Hangul vs. Latin letters decides the direction; the matching session's audio plays, the other is dropped. Fallback without a transcript: which session produced speech.

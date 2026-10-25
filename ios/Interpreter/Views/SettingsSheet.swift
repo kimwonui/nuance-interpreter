@@ -47,6 +47,19 @@ struct SettingsSheet: View {
                     .padding(12)
                 }
 
+                if controller.mode == .auto {
+                    group("Hands-free engine", note: controller.engine == .live
+                          ? "GPT-Live (gpt-live-1): full-duplex voice model with built-in turn-taking and interruptions, told to act only as a Korean↔English interpreter. Billed for the whole time the conversation is on."
+                          : "Interpreter model (gpt-realtime-translate): two dedicated interpretation sessions; NUA picks the direction from the source transcript. Billed only while someone speaks.") {
+                        Picker("Engine", selection: $controller.engine) {
+                            Text("GPT-Live").tag(InterpreterController.Engine.live)
+                            Text("Interpreter model").tag(InterpreterController.Engine.translate)
+                        }
+                        .pickerStyle(.segmented)
+                        .padding(12)
+                    }
+                }
+
                 group("Audio", note: "Audio switches automatically when you connect headphones or Bluetooth.") {
                     row("headphones", "Output now", controller.route)
                 }
