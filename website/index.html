@@ -17,8 +17,8 @@
   <header class="nav">
     <a class="wordmark" href="#top" aria-label="NUA, back to top">NUA</a>
     <nav class="nav-links" aria-label="Sections">
-      <a href="#meaning">Meaning</a>
       <a href="#how">How it works</a>
+      <a href="#meaning">Meaning</a>
       <a href="#demo">Demo</a>
       <a href="#languages">Languages</a>
       <a href="#faq">FAQ</a>
@@ -34,82 +34,18 @@
         <h1>Speak your language.<br><span class="h1-accent">Be heard in theirs.</span></h1>
         <p class="lede">NUA sits on one iPhone between two people. Tap the orb once, then just talk. NUA says it out loud in the other language — built to carry the meaning, feeling, and pace, not only the words.</p>
         <div class="cta-row">
-          <button class="btn btn-primary" type="button" data-film-open>
-            <svg class="play-ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 2.8v10.4a.8.8 0 0 0 1.2.7l8.4-5.2a.8.8 0 0 0 0-1.4L5.7 2.1a.8.8 0 0 0-1.2.7z" fill="currentColor"/></svg>
-            Watch the film <span class="btn-meta">0:44</span>
-          </button>
-          <a class="btn btn-ghost" href="#demo">Try the demo</a>
+          <a class="btn btn-primary" href="#demo">Explore the demo</a>
+          <a class="btn btn-ghost" href="#how">See how it works</a>
         </div>
         <p class="hero-meta"><span class="dot" aria-hidden="true"></span>iPhone prototype in development · Not on the App Store yet</p>
       </div>
-      <figure class="hero-film">
-        <div class="hf-frame">
-          <img class="hf-poster" src="assets/film/hero-poster-480.jpg" srcset="assets/film/hero-poster-480.jpg 480w, assets/film/hero-poster-740.jpg 740w" sizes="(max-width: 900px) min(88vw, 400px), 452px" width="740" height="1080" fetchpriority="high" alt="NUA running on an iPhone: the orb says Speaking English, the other person's half says Listen, and the bottom has Mute and Stop.">
-          <video class="hf-loop" muted loop playsinline preload="none" disablepictureinpicture aria-hidden="true" tabindex="-1" data-src-sm="assets/film/hero-loop-480.mp4" data-src-lg="assets/film/hero-loop-740.mp4"></video>
-          <button class="hf-hit" type="button" data-film-open tabindex="-1" aria-hidden="true"></button>
-          <button class="hf-pause" type="button" aria-label="Pause the background video" hidden>
-            <svg class="i-pause" viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="3" width="2.6" height="10" rx="1" fill="currentColor"/><rect x="9.4" y="3" width="2.6" height="10" rx="1" fill="currentColor"/></svg>
-            <svg class="i-play" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 2.8v10.4a.8.8 0 0 0 1.2.7l8.4-5.2a.8.8 0 0 0 0-1.4L5.7 2.1a.8.8 0 0 0-1.2.7z" fill="currentColor"/></svg>
-          </button>
-        </div>
-        <figcaption>A moment from the NUA concept film · <button class="link-btn" type="button" data-film-open>Watch it, 0:44</button></figcaption>
-      </figure>
-    </section>
-
-    <!-- Hear the meaning -->
-    <section class="meaning" id="meaning" aria-labelledby="meaning-title">
-      <div class="section-head">
-        <p class="eyebrow">Hear the meaning</p>
-        <h2 id="meaning-title">Same meaning.<br>Different feel.</h2>
-        <p class="section-lede">Two people can agree to the same plan in completely different ways. A plain translation turns both into one flat sentence. NUA is built to keep how each person said it.</p>
+      <div class="hero-stage" aria-label="NUA on an iPhone: the screen is split between two people with the orb in the middle" role="img">
+        <div class="stage-3d" id="hero-phone"></div>
+        <div class="ground-shadow" aria-hidden="true"></div>
+        <div class="float-card fc-top" aria-hidden="true"><span class="fc-label"></span><span class="fc-text"></span></div>
+        <div class="float-card fc-bottom" aria-hidden="true"><span class="fc-label"></span><span class="fc-text"></span></div>
+        <p class="stage-note">Illustrative example</p>
       </div>
-      <div class="tone-compare">
-        <div class="tc-pick" role="radiogroup" aria-label="Pick who's talking">
-          <button type="button" role="radio" aria-checked="true" data-tone="formal"><span class="tc-face f-formal" aria-hidden="true"></span><span><b>The colleague</b><small>Polite and measured</small></span></button>
-          <button type="button" role="radio" aria-checked="false" tabindex="-1" data-tone="casual"><span class="tc-face f-casual" aria-hidden="true"></span><span><b>The friend</b><small>Casual and fired up</small></span></button>
-        </div>
-        <div class="tc-card" aria-live="polite">
-          <div class="tc-row tc-source">
-            <div class="tc-head"><span class="tc-kicker">They say · Korean</span><span class="tc-tag" data-field="sounds"></span></div>
-            <canvas class="tc-wave" data-wave="source" aria-hidden="true"></canvas>
-            <p class="tc-line" lang="ko" data-field="ko"></p>
-          </div>
-          <div class="tc-row tc-plain">
-            <div class="tc-head"><span class="tc-kicker">Plain translation</span><span class="tc-tag">Same sentence for both</span></div>
-            <canvas class="tc-wave" data-wave="plain" aria-hidden="true"></canvas>
-            <p class="tc-line" data-field="plain"></p>
-          </div>
-          <div class="tc-row tc-nua">
-            <div class="tc-head"><span class="tc-kicker">What NUA aims for</span><span class="tc-tag" data-field="keeps"></span></div>
-            <canvas class="tc-wave" data-wave="nua" aria-hidden="true"></canvas>
-            <p class="tc-line" data-field="nua"></p>
-          </div>
-        </div>
-        <p class="tc-note"><span class="badge">Example text</span> Written for this page to show the idea, not recorded from the app. No audio plays here, the waveforms are drawings, and real wording will vary.</p>
-      </div>
-      <div class="feature-grid">
-        <article class="feature">
-          <span class="f-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h7"/><path d="M17 15l3 3-3 3"/></svg></span>
-          <h3>Meaning over literal</h3>
-          <p>Aims to say what you meant, the way a person would say it in the other language.</p>
-        </article>
-        <article class="feature">
-          <span class="f-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg></span>
-          <h3>Feeling and tone</h3>
-          <p>Warm should stay warm, a joke should stay light, and urgency should still sound urgent. That's the target.</p>
-        </article>
-        <article class="feature">
-          <span class="f-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M10 2h4"/></svg></span>
-          <h3>Your pace</h3>
-          <p>Designed to follow how fast or slowly you speak, instead of one flat reading speed.</p>
-        </article>
-        <article class="feature">
-          <span class="f-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 12h2"/></svg></span>
-          <h3>Rhythm and pauses</h3>
-          <p>Waits for the speaker to finish before answering, then speaks with natural pauses of its own.</p>
-        </article>
-      </div>
-      <p class="honest-note">This is the direction NUA is built toward, not a promise. Results vary by language, voice, and setting, and the prototype is still being tested.</p>
     </section>
 
     <!-- One phone, two voices -->
@@ -136,21 +72,58 @@
               <p>When you pause, NUA says it in their language, and a soft light flows toward the person who should listen.</p>
             </li>
           </ol>
-          <div class="how-next">
-            <a class="btn btn-primary" href="#demo">Now try it yourself</a>
-            <span>The same screen, working, just below.</span>
-          </div>
         </div>
         <div class="how-stage" aria-hidden="true">
           <div class="table">
-            <span class="seat seat-them"><i class="avatar av-them"></i><b>Them</b> reads the top half</span>
-            <div class="float-card fc-them"><span class="fc-label"></span><span class="fc-text"></span></div>
+            <span class="seat seat-them"><b>Them</b> reads the top half</span>
             <div class="stage-3d" id="table-phone"></div>
-            <div class="float-card fc-you"><span class="fc-label"></span><span class="fc-text"></span></div>
-            <span class="seat seat-you"><i class="avatar av-you"></i><b>You</b> read the bottom half</span>
+            <span class="seat seat-you"><b>You</b> read the bottom half</span>
           </div>
         </div>
       </div>
+    </section>
+
+    <!-- Hear the meaning -->
+    <section class="meaning" id="meaning" aria-labelledby="meaning-title">
+      <div class="section-head">
+        <p class="eyebrow">Hear the meaning</p>
+        <h2 id="meaning-title">Not just the words.<br>The way you said them.</h2>
+        <p class="section-lede">Word-for-word translation loses what people actually mean. NUA is built around a different goal: carry the intent and the feeling across, in a voice that keeps your pace.</p>
+      </div>
+      <figure class="voice-compare">
+        <div class="vc-row">
+          <span class="vc-label">You · Korean</span>
+          <canvas class="vc-wave" data-wave="source" aria-hidden="true"></canvas>
+        </div>
+        <div class="vc-row">
+          <span class="vc-label vc-accent">NUA · English</span>
+          <canvas class="vc-wave" data-wave="output" aria-hidden="true"></canvas>
+        </div>
+        <figcaption>Illustration of the goal, not a recording: the reply follows the shape of the original — where it rises, slows, and pauses.</figcaption>
+      </figure>
+      <div class="feature-grid">
+        <article class="feature">
+          <span class="f-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h7"/><path d="M17 15l3 3-3 3"/></svg></span>
+          <h3>Meaning over literal</h3>
+          <p>Aims to say what you meant, the way a person would say it in the other language.</p>
+        </article>
+        <article class="feature">
+          <span class="f-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg></span>
+          <h3>Feeling and tone</h3>
+          <p>Warm should stay warm, a joke should stay light, and urgency should still sound urgent. That's the target.</p>
+        </article>
+        <article class="feature">
+          <span class="f-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M10 2h4"/></svg></span>
+          <h3>Your pace</h3>
+          <p>Designed to follow how fast or slowly you speak, instead of one flat reading speed.</p>
+        </article>
+        <article class="feature">
+          <span class="f-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 12h2"/></svg></span>
+          <h3>Rhythm and pauses</h3>
+          <p>Waits for the speaker to finish before answering, then speaks with natural pauses of its own.</p>
+        </article>
+      </div>
+      <p class="honest-note">This is the direction NUA is built toward, not a promise. Results vary by language, voice, and setting, and the prototype is still being tested.</p>
     </section>
 
     <!-- Interactive walkthrough -->
@@ -270,10 +243,6 @@
           <p>By default NUA uses GPT-Live: your speech and the spoken interpretation travel directly between the iPhone and OpenAI, which does the interpreting. The NUA server helps set up that connection and receives only numeric diagnostics such as timing, not what was said. The in-app History is kept in memory, not stored permanently. Audio handled by OpenAI is subject to OpenAI's own policies.</p>
         </details>
         <details>
-          <summary>Is the film a recording of the app?</summary>
-          <p>No. It's a concept film with music and on-screen text, made with an earlier build. A few things have changed since: you now start by tapping the orb, Two-way and One-way sit at the bottom of the screen, and the language labels are different. The interactive demo on this page follows the current app.</p>
-        </details>
-        <details>
           <summary>How good is the interpretation?</summary>
           <p>NUA is built to carry meaning, feeling, and pace in every language it offers. Like any interpreter, it can still make mistakes, and results depend on the speaker and the setting.</p>
         </details>
@@ -286,33 +255,19 @@
       <h2 id="closing-title">One tap. Two languages.<br>A conversation that sounds like you.</h2>
       <div class="cta-row center">
         <a class="btn btn-primary" href="#demo">Back to the demo</a>
-        <button class="btn btn-ghost" type="button" data-film-open>Watch the film</button>
+        <a class="btn btn-ghost" href="#how">See how it works</a>
       </div>
     </section>
   </main>
 
   <footer class="footer">
     <span class="wordmark">NUA</span>
-    <p>From <i>nuance</i>. An iPhone prototype in development, not available on the App Store. Interpretation uses OpenAI real-time voice models; NUA is not affiliated with OpenAI. All conversations on this page, including the film, are illustrative examples.</p>
+    <p>From <i>nuance</i>. An iPhone prototype in development, not available on the App Store. Interpretation uses OpenAI real-time voice models; NUA is not affiliated with OpenAI. All conversations on this page are illustrative examples.</p>
   </footer>
-
-  <dialog class="film-dialog" id="film" aria-labelledby="film-title">
-    <div class="fd-box">
-      <div class="fd-head">
-        <h2 class="fd-title" id="film-title">NUA concept film <span>0:44 · with music</span></h2>
-        <button class="fd-close" type="button" aria-label="Close the film"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
-      </div>
-      <div class="fd-video">
-        <video controls playsinline preload="none" data-src-sm="assets/film/film-720.mp4" data-src-lg="assets/film/film-1080.mp4" data-poster="assets/film/film-poster.jpg"></video>
-      </div>
-      <p class="fd-note">Concept film, made with an earlier build. Its Start conversation button and language labels have since changed: today you tap the orb to start, and Two-way / One-way sits at the bottom. Music and on-screen text only, no voice-over. <a href="#demo" data-film-close>Try the current screen</a></p>
-    </div>
-  </dialog>
 
   <script src="assets/js/langs.js"></script>
   <script src="assets/js/orb.js"></script>
   <script src="assets/js/phone.js"></script>
   <script src="assets/js/main.js"></script>
-  <script src="assets/js/film.js"></script>
 </body>
 </html>

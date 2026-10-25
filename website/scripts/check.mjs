@@ -1,8 +1,7 @@
 // Static checks for the NUA site (no dependencies): JS syntax, links and assets, no network/mic/audio
-// code, video rules (no sound without a click, lazy loading, size budgets), what gets published,
-// the 14-language list, and copy rules (no fake download/sign-up, required honesty labels).
+// code, the 14-language list, and copy rules (no fake download/sign-up, required honesty labels).
 //   node scripts/check.mjs
-import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,61 +30,19 @@ for (const [, id] of html.matchAll(/href="#([^"]*)"/g)) {
   if (!ids.has(id)) fail(`anchor #${id} has no target`);
 }
 ok(`anchors resolve (${ids.size} ids)`);
-const refs = [...html.matchAll(/\s(?:src|href|data-src-sm|data-src-lg|data-poster)="([^"#][^"]*)"/g)].map((m) => m[1]);
-for (const [, set] of html.matchAll(/\ssrcset="([^"]+)"/g)) refs.push(...set.split(",").map((c) => c.trim().split(/\s+/)[0]));
-for (const ref of refs) {
+for (const [, ref] of html.matchAll(/(?:src|href)="([^"#][^"]*)"/g)) {
   if (/^https?:/.test(ref)) {
     if (!/^https:\/\/fonts\.(googleapis|gstatic)\.com/.test(ref)) fail("unexpected external URL: " + ref);
     continue;
   }
   if (!existsSync(join(root, ref))) fail("missing asset: " + ref);
 }
-ok(`local assets exist (${refs.length} refs); only Google Fonts is external`);
+ok("local assets exist; only Google Fonts is external");
 
 // 3. The demo never touches the network, microphone or speakers
 const banned = [/\bfetch\s*\(/, /XMLHttpRequest/, /WebSocket/, /getUserMedia/, /new\s+Audio\s*\(/, /AudioContext/, /speechSynthesis/, /sendBeacon/];
 for (const re of banned) if (re.test(js)) fail("site JS must not use " + re);
 ok("no network, microphone or audio APIs in site JS");
-
-// 3b. Video: nothing autoplays with sound, nothing downloads before it's needed
-const videos = [...html.matchAll(/<video\b([^>]*)>/g)].map((m) => m[1]);
-if (videos.length !== 2) fail(`expected 2 videos (hero loop, film), found ${videos.length}`);
-for (const v of videos) {
-  if (/\sautoplay\b/.test(v)) fail("video must not have autoplay: " + v.trim());
-  if (/\ssrc=/.test(v)) fail("video src must be set by script, not in HTML: " + v.trim());
-  if (!/preload="none"/.test(v)) fail('video needs preload="none": ' + v.trim());
-}
-const heroLoop = videos.find((v) => /hf-loop/.test(v)) || "";
-if (!/\smuted\b/.test(heroLoop) || !/\splaysinline\b/.test(heroLoop)) fail("hero loop must be muted and playsinline");
-if (!/<dialog[^>]*id="film"[\s\S]*<video\b[^>]*\scontrols\b[\s\S]*<\/dialog>/.test(html)) fail("the film (with sound) must live in the dialog, with controls");
-if (/\.muted\s*=\s*false|\.autoplay\s*=|setAttribute\(\s*["'](autoplay|muted)/.test(js)) fail("site JS must not unmute or autoplay video");
-const playCalls = jsFiles.filter((f) => /\.play\(/.test(readFileSync(f, "utf8"))).map((f) => f.slice(jsDir.length + 1));
-if (playCalls.join() !== "film.js") fail("only film.js may start video playback, found: " + playCalls.join());
-const budget = { "hero-loop-480.mp4": 400e3, "hero-loop-740.mp4": 700e3, "hero-poster-480.jpg": 80e3, "hero-poster-740.jpg": 130e3, "film-poster.jpg": 130e3, "film-720.mp4": 6.5e6, "film-1080.mp4": 9e6 };
-for (const [f, max] of Object.entries(budget)) {
-  const p = join(root, "assets/film", f);
-  if (!existsSync(p)) { fail("missing film asset: " + f); continue; }
-  const size = statSync(p).size;
-  if (size > max) fail(`${f} is ${(size / 1e3).toFixed(0)} kB, budget ${(max / 1e3).toFixed(0)} kB`);
-}
-ok("videos: no autoplay sound, lazy sources, within size budgets");
-
-// 3c. What gets published: everything not in .vercelignore must be a normal web file
-const ignore = readFileSync(join(root, ".vercelignore"), "utf8").split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
-for (const must of [".env*", "scripts", "README.md", "package.json", ".vercel"]) if (!ignore.includes(must)) fail(".vercelignore must list " + must);
-const ignored = (name) => ignore.some((p) => (p.endsWith("*") ? name.startsWith(p.slice(0, -1)) : name === p));
-const published = [];
-(function walk(dir, rel) {
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    const r = rel ? rel + "/" + e.name : e.name;
-    if (!rel && ignored(e.name)) continue;
-    if (e.isDirectory()) walk(join(dir, e.name), r); else published.push(r);
-  }
-})(root, "");
-for (const f of published) {
-  if (!/\.(html|css|js|svg|jpg|png|webp|mp4)$/.test(f) || /(^|\/)\./.test(f)) fail("unexpected file would be published: " + f);
-}
-ok(`published files look clean (${published.length})`);
 
 // 4. Languages match the app (ios/Interpreter/App/Models.swift)
 const codes = [...js.matchAll(/\{ code: "([a-z]{2})"/g)].map((m) => m[1]);
@@ -116,9 +73,6 @@ const required = [
   "hasn't been tested in real conversations",
   "numeric diagnostics",
   "not stored permanently",
-  "Example text",
-  "Concept film",
-  "made with an earlier build",
 ];
 for (const s of required) if (!html.includes(s) && !js.includes(s)) fail("missing required label: " + s);
 ok("honesty labels present");

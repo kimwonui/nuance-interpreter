@@ -1,5 +1,5 @@
-// Page controller: two phones (table story, interactive demo), scroll/pointer poses, the demo panel,
-// the languages grid and the "same meaning, different feel" comparison. The hero film is in film.js.
+// Page controller: three phones (hero, table story, interactive demo), scroll/pointer poses,
+// the demo panel, the languages grid and the "hear the meaning" waveform illustration.
 (function () {
   const NUA = window.NUA;
   const params = new URLSearchParams(location.search);
@@ -83,19 +83,12 @@
     app.render();
   }
 
-  // ---------------------------------------------------------------- One phone, two voices (scroll story)
-  const how = $("#how");
-  const howStage = $(".how-stage");
-  const tableHost = $("#table-phone");
-  const table = new NUA.Phone(tableHost, phoneOpts);
-  fit(table, tableHost.parentElement, 0.94, 0.66);
-  const tablePose = posed(table, { rx: 50, ry: 0, rz: 0 });
-  const steps = $$(".how-steps li");
-  const howNext = $(".how-next");
-  let step = -1, storyRun = 0;
-
-  // Speech bubbles beside the two people: what was said, then what NUA says to the other person.
-  const cards = { them: $(".fc-them"), me: $(".fc-you") };
+  // ---------------------------------------------------------------- Hero
+  const heroHost = $("#hero-phone");
+  const hero = new NUA.Phone(heroHost, phoneOpts);
+  fit(hero, heroHost.parentElement, 0.8, 0.72);
+  const heroPose = posed(hero, { rx: 6, ry: -20, rz: 2 });
+  const cards = { them: $(".fc-top"), me: $(".fc-bottom") };
   function showCard(side, label, text, nua) {
     const c = cards[side];
     if (!text) return c.classList.remove("show");
@@ -106,7 +99,7 @@
     c.classList.add("show");
   }
   function hideCards() { cards.them.classList.remove("show"); cards.me.classList.remove("show"); }
-  table.app.on((type, d) => {
+  hero.app.on((type, d) => {
     if (type === "line" && d.phase === "talk") {
       hideCards();
       showCard(d.side, `${d.side === "me" ? "You" : "Them"} · ${d.from.name}`, d.src);
@@ -114,6 +107,24 @@
       showCard(d.side === "me" ? "them" : "me", `NUA · ${d.to.name}`, d.out, true);
     } else if (type === "stopped") hideCards();
   });
+  if (reduce) {
+    stillFrame(hero.app);
+    const line = NUA.SAMPLES.ko[0];
+    showCard("me", "You · Korean", line.ko);
+    showCard("them", "NUA · English", line.en, true);
+  } else {
+    autoplay(hero.app, () => hero.visible);
+  }
+
+  // ---------------------------------------------------------------- One phone, two voices (scroll story)
+  const how = $("#how");
+  const howStage = $(".how-stage");
+  const tableHost = $("#table-phone");
+  const table = new NUA.Phone(tableHost, phoneOpts);
+  fit(table, tableHost.parentElement, 0.94, 0.66);
+  const tablePose = posed(table, { rx: 50, ry: 0, rz: 0 });
+  const steps = $$(".how-steps li");
+  let step = -1, storyRun = 0;
 
   async function storyTalk(run) {
     while (run === storyRun) {
@@ -128,9 +139,7 @@
     step = i;
     steps.forEach((li, k) => { li.classList.toggle("active", k === i); li.classList.toggle("seen", k < i); });
     howStage.classList.toggle("seats", i >= 1);
-    howNext.classList.toggle("ready", i === 3);
     const run = ++storyRun;
-    if (i < 3) hideCards();
     if (i < 2) table.app.stop();
     else if (i === 2) {
       if (table.app.s.auto === "off") table.app.start();
@@ -164,17 +173,12 @@
     stillFrame(table.app);
     steps.forEach((li) => li.classList.add("active"));
     howStage.classList.add("seats");
-    howNext.classList.add("ready");
-    const line = NUA.SAMPLES.ko[0];
-    showCard("me", "You · Korean", line.ko);
-    showCard("them", "NUA · English", line.en, true);
   } else {
     let narrowLoop = false;
     const onLayout = () => {
       if (narrow()) {
         Object.assign(tablePose.target, { rx: 48, ry: 0, rz: 0 });
         steps.forEach((li) => { li.classList.remove("seen"); li.classList.add("active"); });
-        howNext.classList.add("ready");
         if (!narrowLoop) { narrowLoop = true; storyRun++; autoplay(table.app, () => table.visible && narrow()); }
       } else {
         step = -1;
@@ -276,17 +280,23 @@
   }
 
   // ---------------------------------------------------------------- Pose targets from pointer + scroll
-  function poseFrame() {
+  function heroFrame() {
     if (reduce) return;
+    const h = $(".hero").offsetHeight;
+    const p = clamp(scrollY / h, 0, 1);
+    heroPose.target.rx = 6 - pointer.y * 7 + p * 14;
+    heroPose.target.ry = -20 + pointer.x * 14 - p * 16;
+    heroPose.target.rz = 2 - p * 3;
+    heroHost.style.transform = `translateY(${(p * 70).toFixed(1)}px)`;
     if (demoHover) {
       const r = demoStage.getBoundingClientRect();
       const lx = clamp(((pointer.x + 1) / 2 * innerWidth - r.left) / r.width * 2 - 1, -1, 1);
       demoPose.target.ry = -8 + lx * 6;
     } else demoPose.target.ry = -8;
     if (narrow()) { demoPose.target.ry = 0; demoPose.target.rx = 0; }
-    requestAnimationFrame(poseFrame);
+    requestAnimationFrame(heroFrame);
   }
-  poseFrame();
+  heroFrame();
   poseTick();
 
   // ---------------------------------------------------------------- Languages grid
@@ -304,118 +314,58 @@
     grid.appendChild(li);
   });
 
-  // ---------------------------------------------------------------- Same meaning, different feel (example text, no audio)
-  const TONES = {
-    formal: {
-      ko: "제안해 주신 내용에 전적으로 동의합니다. 그대로 진행하시지요.",
-      sounds: "Sounds polite, even, unhurried",
-      nua: "I fully agree with your proposal. Please, proceed.",
-      keeps: "Keeps it polite",
-      // [start, end, height, spread]: phrases with pauses; spread = how much the loudness jumps around
-      shape: [[0.02, 0.45, 0.52, 0.18], [0.52, 0.97, 0.48, 0.18]],
-    },
-    casual: {
-      ko: "그 계획 완전 내 스타일이야, 걍 밀고 가자!",
-      sounds: "Sounds excited, quick, loud",
-      nua: "Yo, that plan's my style. Let's roll with it!",
-      keeps: "Keeps it casual",
-      shape: [[0.02, 0.2, 0.95, 0.6], [0.25, 0.52, 0.75, 0.6], [0.57, 0.97, 1, 0.55]],
-    },
-  };
-  const PLAIN = "I agree with the plan. Let's go ahead.";
-  const FLAT = [[0.03, 0.47, 0.42, 0.06], [0.53, 0.96, 0.42, 0.06]];
-  const tc = $(".tone-compare");
-  const toneButtons = $$(".tc-pick [data-tone]");
-  const tcWaves = $$(".tc-wave", tc);
-  const field = (k) => $(`[data-field="${k}"]`, tc);
-  let tone = "formal", tcHead = reduce ? 1 : 0, tcVisible = false, mix = 1;
-
-  const rand = (i) => { const v = Math.sin(i * 12.9898) * 43758.5453; return v - Math.floor(v); };
-  function level(shape, x, i, seed) {
-    for (const [a, b, h, spread] of shape) {
-      if (x < a || x > b) continue;
-      const u = (x - a) / (b - a);
-      const env = Math.sin(Math.PI * Math.pow(u, 0.85));
-      return h * env * (1 - spread + spread * rand(i * 1.7 + seed));
-    }
+  // ---------------------------------------------------------------- Waveform illustration
+  const waves = $$(".vc-wave");
+  // One shared contour (three phrases with pauses); the reply keeps the same shape at a slightly different length.
+  const contour = (x) => {
+    const phrases = [[0.02, 0.3, 0.9], [0.36, 0.62, 0.6], [0.68, 0.97, 1]];
+    for (const [a, b, h] of phrases) if (x >= a && x <= b) { const u = (x - a) / (b - a); return h * Math.sin(Math.PI * Math.pow(u, 0.8)); }
     return 0;
-  }
-  function drawTone() {
-    const t = TONES[tone];
-    tcWaves.forEach((cv) => {
+  };
+  const rand = (i) => { const v = Math.sin(i * 12.9898) * 43758.5453; return v - Math.floor(v); };
+  let waveHead = reduce ? 1 : 0, waveVisible = false;
+  function drawWaves() {
+    waves.forEach((cv) => {
       const w = cv.clientWidth, h = cv.clientHeight, dpr = Math.min(2, devicePixelRatio || 1);
-      if (!w) return;
       if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
       const g = cv.getContext("2d");
       g.setTransform(dpr, 0, 0, dpr, 0, 0);
       g.clearRect(0, 0, w, h);
-      const kind = cv.dataset.wave;
-      const shape = kind === "plain" ? FLAT : t.shape;
-      const bars = Math.max(28, Math.floor(w / 6));
-      let fill = "#9C9CA5";
-      if (kind === "nua") {
-        fill = g.createLinearGradient(0, 0, w, 0);
-        fill.addColorStop(0, "#FF5A1E"); fill.addColorStop(0.62, "#F8324E"); fill.addColorStop(1, "#F0276A");
-      } else if (kind === "source") fill = "#26262B";
-      g.fillStyle = fill;
+      const out = cv.dataset.wave === "output";
+      const bars = Math.max(30, Math.floor(w / 6));
+      const grad = g.createLinearGradient(0, 0, w, h);
+      grad.addColorStop(0, "#FF5A1E"); grad.addColorStop(0.62, "#F8324E"); grad.addColorStop(1, "#F0276A");
       for (let i = 0; i < bars; i++) {
         const x = i / bars;
-        const amp = level(shape, x, i, kind === "nua" ? 0 : kind === "source" ? 0 : 31) * (kind === "plain" ? 1 : mix);
-        const bh = Math.max(2, amp * (h - 4));
-        g.globalAlpha = x <= tcHead ? 1 : 0.22;
-        const bx = i * (w / bars), bw = Math.max(2, w / bars - 2.5);
+        const src = out ? Math.min(1, x * 1.04 - 0.02) : x;
+        const amp = contour(src) * (0.45 + 0.55 * rand(i + (out ? 97 : 0)));
+        const bh = Math.max(2, amp * (h - 6));
+        const played = x <= waveHead;
+        g.globalAlpha = played ? 1 : 0.28;
+        g.fillStyle = out ? grad : "#9C9CA5";
+        const bx = i * (w / bars);
         g.beginPath();
-        if (g.roundRect) g.roundRect(bx, (h - bh) / 2, bw, bh, 2); else g.rect(bx, (h - bh) / 2, bw, bh);
+        if (g.roundRect) g.roundRect(bx, (h - bh) / 2, Math.max(2, w / bars - 2.5), bh, 2);
+        else g.rect(bx, (h - bh) / 2, Math.max(2, w / bars - 2.5), bh);
         g.fill();
       }
       g.globalAlpha = 1;
     });
   }
-  function setTone(next, focus) {
-    tone = next;
-    const t = TONES[tone];
-    toneButtons.forEach((b) => {
-      const on = b.dataset.tone === tone;
-      b.setAttribute("aria-checked", on);
-      b.tabIndex = on ? 0 : -1;
-      if (on && focus) b.focus();
-    });
-    tc.dataset.current = tone;
-    field("ko").textContent = t.ko;
-    field("sounds").textContent = t.sounds;
-    field("plain").textContent = PLAIN;
-    field("nua").textContent = t.nua;
-    field("keeps").textContent = t.keeps;
-    tcHead = reduce ? 1 : 0;
-    tcStart = 0;
-    mix = reduce ? 1 : 0.2;
-    drawTone();
-  }
-  toneButtons.forEach((b, k) => {
-    b.addEventListener("click", () => setTone(b.dataset.tone));
-    b.addEventListener("keydown", (e) => {
-      const d = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
-      if (!d) return;
-      e.preventDefault();
-      setTone(toneButtons[(k + d + toneButtons.length) % toneButtons.length].dataset.tone, true);
-    });
-  });
   if (window.IntersectionObserver) {
-    new IntersectionObserver((e) => { tcVisible = e[0].isIntersecting; }, { threshold: 0.25 }).observe($(".tc-card"));
-  } else tcVisible = true;
-  let lastTc = 0, tcStart = 0;
-  function tcTick(ms) {
-    if (!reduce && tcVisible) {
-      if (!tcStart || tcHead >= 1.25) tcStart = ms; // sweep, rest a moment, sweep again
-      tcHead = (ms - tcStart) / 3200;
-      mix = Math.min(1, mix + 0.06);
-      if (ms - lastTc > 50) { drawTone(); lastTc = ms; }
+    new IntersectionObserver((e) => { waveVisible = e[0].isIntersecting; }, { threshold: 0.3 }).observe($(".voice-compare"));
+  } else waveVisible = true;
+  let lastWave = 0;
+  function waveTick(ms) {
+    if (!reduce && waveVisible) {
+      waveHead = ((ms / 1000) % 5) / 4.2;
+      if (ms - lastWave > 50) { drawWaves(); lastWave = ms; }
     }
-    requestAnimationFrame(tcTick);
+    requestAnimationFrame(waveTick);
   }
-  setTone("formal");
-  addEventListener("resize", drawTone);
-  requestAnimationFrame(tcTick);
+  drawWaves();
+  addEventListener("resize", drawWaves);
+  requestAnimationFrame(waveTick);
 
   // ---------------------------------------------------------------- Closing orb (idle breathing, as on launch)
   const closing = $("#closing-orb");
@@ -445,6 +395,6 @@
         if (e.isIntersecting) links.forEach((a) => a.classList.toggle("on", a.getAttribute("href") === "#" + e.target.id));
       });
     }, { rootMargin: "-45% 0px -50% 0px" });
-    ["meaning", "how", "demo", "languages", "faq"].forEach((id) => io.observe(document.getElementById(id)));
+    ["how", "meaning", "demo", "languages", "faq"].forEach((id) => io.observe(document.getElementById(id)));
   }
 })();
