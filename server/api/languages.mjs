@@ -8,6 +8,8 @@ export default async function handler(req, res) {
   if (!process.env.APP_SHARED_SECRET || req.headers['x-app-key'] !== process.env.APP_SHARED_SECRET) return res.status(401).json({ error: 'unauthorized' });
   return res.status(200).json({
     languages: Object.entries(LANGUAGES).map(([code, name]) => ({ code, name, tried: TRIED_LANGUAGES.includes(code), liveOnly: LIVE_ONLY_LANGUAGES.includes(code) })),
+    // Directions /api/live accepts; the app offers One-way only when the deployed server lists it.
+    directions: ['two-way', 'one-way'],
     note: 'OpenAI publishes no language list for gpt-live-1. Only Korean and English have been tried; other languages are experimental.',
   });
 }
