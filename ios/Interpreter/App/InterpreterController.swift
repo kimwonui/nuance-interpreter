@@ -239,6 +239,10 @@ final class InterpreterController: ObservableObject {
             s.onEvent = { [weak self, weak s] e in guard let self, let s, self.live === s else { return }; self.liveEvent(e) }
             s.onLevels = { [weak self, weak s] i, o in guard let self, let s, self.live === s else { return }; self.liveLevels(i, o) }
             s.onHoldChange = { [weak self, weak s] h in guard let self, let s, self.live === s else { return }; self.liveHolding = h }
+            s.onCutIn = { [weak self, weak s] mic, out in
+                guard let self, let s, self.live === s else { return }
+                self.tokens.report(["mode": "live:cutin", "route": String(format: "mic %.3f out %.3f", mic, out)])
+            }
             s.onRelease = { [weak self, weak s] dt in
                 guard let self, let s, self.live === s else { return }
                 let dir = self.turns.last.map { "\($0.source.code)→\($0.target.code)" } ?? "?"

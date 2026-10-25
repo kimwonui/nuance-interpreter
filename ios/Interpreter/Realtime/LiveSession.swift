@@ -23,6 +23,7 @@ final class LiveSession: NSObject {
     /// Hold-until-pause mode: seconds from the user's last speech to NUA's first released audio.
     var onRelease: ((Double) -> Void)?
     var onHoldChange: ((Bool) -> Void)?
+    var onCutIn: ((Float, Float) -> Void)?
 
     /// Standard WebRTC audio (plays NUA as soon as it arrives).
     private static let standardFactory: RTCPeerConnectionFactory = {
@@ -62,6 +63,7 @@ final class LiveSession: NSObject {
             device.onLevels = { [weak self] i, o in Task { @MainActor in self?.onLevels?(i, o) } }
             device.onRelease = { [weak self] dt in Task { @MainActor in self?.onRelease?(dt) } }
             device.onHoldChange = { [weak self] h in Task { @MainActor in self?.onHoldChange?(h) } }
+            device.onCutIn = { [weak self] m, o in Task { @MainActor in self?.onCutIn?(m, o) } }
         } else {
             configureAudioSession()
         }
@@ -129,6 +131,7 @@ final class LiveSession: NSObject {
                 Self.gatedDevice.onLevels = nil
                 Self.gatedDevice.onRelease = nil
                 Self.gatedDevice.onHoldChange = nil
+                Self.gatedDevice.onCutIn = nil
                 Self.gatedOwner = nil
             }
             return

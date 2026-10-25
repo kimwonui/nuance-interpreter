@@ -23,6 +23,8 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     var onRelease: ((Double) -> Void)?
     /// true while NUA's voice is buffered and waiting for the user's pause (real gate state, not a timer).
     var onHoldChange: ((Bool) -> Void)?
+    /// A cut-in stopped NUA: mic level and NUA's playing level at that moment (diagnostics).
+    var onCutIn: ((Float, Float) -> Void)?
     private var holdingReported = false
 
     private weak var adm: RTCAudioDeviceDelegate?
@@ -45,6 +47,12 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     /// of the mic, so it can never hear and re-translate its own voice. Local cut-in detection still runs.
     private var suppressUntil: Double = 0
     private var lastReleaseEnd: Double = 0
+    /// Last time NUA's incoming audio had speech. NUA's turn stays "playing" through gaps shorter than
+    /// `turnGap`, so a small sound between its phrases can't re-arm the hold and pause it mid-translation.
+    private var lastNuaVoice: Double = 0
+    private static let turnGap = 0.6
+    /// Smoothed level of what NUA is playing; echo of NUA's own voice tracks it, a real interruption exceeds it.
+    private var outLevel: Float = 0
 
     // Render-thread scratch (preallocated).
     private var pull = [Int16](repeating: 0, count: 8_192)
@@ -78,6 +86,8 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         silentQueued = 0
         suppressUntil = 0
         lastReleaseEnd = 0
+        lastNuaVoice = 0
+        outLevel = 0
         os_unfair_lock_unlock(&lock)
         holdingReported = false
     }
@@ -213,26 +223,34 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         let now = CFAbsoluteTimeGetCurrent()
         os_unfair_lock_lock(&lock)
         let playing = releasing
-        // Stricter while NUA plays, so leftover echo is not taken for the user.
-        let threshold = playing ? max(0.06, noiseFloor * 6) : max(0.015, noiseFloor * 3)
-        let needed = Int(Self.rate * (playing ? 0.3 : 0.08))
+        // While NUA plays, a cut-in must be above a fixed floor, above the noise floor, AND clearly above the
+        // level NUA is playing at (its own echo follows that level; a person talking over it exceeds it).
+        // Not playing: a lower bar, only used to time the 0.5 s pause.
+        let threshold = playing ? max(0.06, noiseFloor * 6, outLevel * 0.6) : max(0.015, noiseFloor * 3)
+        // Sustained speech, not clicks or coughs: ~0.35 s while NUA plays, ~0.15 s otherwise. Brief dips are
+        // tolerated (leaky count) instead of resetting, so real speech isn't missed between syllables.
+        let needed = Int(Self.rate * (playing ? 0.35 : 0.15))
         if rms > threshold {
             voiceRun += frames
-            if voiceRun >= needed {
-                lastVoice = now
-                if playing {
-                    // Cut-in: stop NUA, drop what was queued, and let the mic through right away.
-                    ring.clear()
-                    releasing = false
-                    suppressUntil = 0
-                    lastReleaseEnd = now
-                }
-            }
         } else {
-            voiceRun = 0
+            voiceRun = max(0, voiceRun - frames / 2)
             if !playing { noiseFloor = min(0.03, noiseFloor * 0.98 + rms * 0.02) }
         }
+        var cutIn: (Float, Float)?
+        if voiceRun >= needed {
+            lastVoice = now
+            if playing {
+                cutIn = (rms, outLevel)
+                // Cut-in: stop NUA, drop what was queued, and let the mic through right away.
+                ring.clear()
+                releasing = false
+                suppressUntil = 0
+                lastReleaseEnd = now
+                lastNuaVoice = 0
+            }
+        }
         os_unfair_lock_unlock(&lock)
+        if let cutIn { onCutIn?(cutIn.0, cutIn.1) }
     }
 
     // MARK: WebRTC → hold-until-pause gate → speaker
@@ -266,6 +284,7 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         if pulledVoiced {
             pull.withUnsafeBufferPointer { ring.write($0.baseAddress!, count) }
             silentQueued = 0
+            lastNuaVoice = now
         } else if !releasing, !ring.isEmpty, silentQueued < Int(Self.rate * 0.6) {
             pull.withUnsafeBufferPointer { ring.write($0.baseAddress!, count) }
             silentQueued += count
@@ -281,10 +300,13 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
             let got = ring.read(into: dst, count)
             for i in 0..<got { outSum += dst[i] * dst[i] }
             if got < count { for i in got..<count { dst[i] = 0 } }
-            if ring.isEmpty && !pulledVoiced { releasing = false; lastReleaseEnd = now }
+            // NUA's turn ends only after a real gap, not at every pause between its phrases.
+            if ring.isEmpty && !pulledVoiced && now - lastNuaVoice > Self.turnGap { releasing = false; lastReleaseEnd = now }
         } else {
             for i in 0..<count { dst[i] = 0 }
         }
+        let level = sqrt(outSum / Float(max(count, 1)))
+        outLevel = releasing ? outLevel * 0.8 + level * 0.2 : 0
         let holdingNow = !releasing && !ring.isEmpty
         os_unfair_lock_unlock(&lock)
         if count < n { for i in count..<n { dst[i] = 0 } }
