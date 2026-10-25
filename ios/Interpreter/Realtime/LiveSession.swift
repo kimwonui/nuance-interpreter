@@ -31,6 +31,8 @@ final class LiveSession: NSObject {
     }()
     /// App-owned audio device that holds NUA's voice until the user has paused (see GatedAudioDevice).
     static let gatedDevice = GatedAudioDevice()
+    /// The session that currently owns the shared device callbacks (a stopped session must not clear a new one's).
+    private static var gatedOwner: ObjectIdentifier?
     private static let gatedFactory: RTCPeerConnectionFactory = {
         RTCInitializeSSL()
         return RTCPeerConnectionFactory(encoderFactory: RTCDefaultVideoEncoderFactory(), decoderFactory: RTCDefaultVideoDecoderFactory(), audioDevice: gatedDevice)
@@ -55,6 +57,8 @@ final class LiveSession: NSObject {
         let factory = gated ? Self.gatedFactory : Self.standardFactory
         if gated {
             let device = Self.gatedDevice
+            device.reset()
+            Self.gatedOwner = ObjectIdentifier(self)
             device.onLevels = { [weak self] i, o in Task { @MainActor in self?.onLevels?(i, o) } }
             device.onRelease = { [weak self] dt in Task { @MainActor in self?.onRelease?(dt) } }
             device.onHoldChange = { [weak self] h in Task { @MainActor in self?.onHoldChange?(h) } }
@@ -104,6 +108,8 @@ final class LiveSession: NSObject {
     func stop() {
         guard !closing else { return }
         closing = true
+        micTrack?.isEnabled = false // stop sending the mic immediately
+        if gated { Self.gatedDevice.reset() }
         send(["type": "session.close"])
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.teardown() }
     }
@@ -119,9 +125,12 @@ final class LiveSession: NSObject {
         channel = nil
         micTrack = nil
         if gated {
-            Self.gatedDevice.onLevels = nil
-            Self.gatedDevice.onRelease = nil
-            Self.gatedDevice.onHoldChange = nil
+            if Self.gatedOwner == ObjectIdentifier(self) {
+                Self.gatedDevice.onLevels = nil
+                Self.gatedDevice.onRelease = nil
+                Self.gatedDevice.onHoldChange = nil
+                Self.gatedOwner = nil
+            }
             return
         }
         let s = RTCAudioSession.sharedInstance()

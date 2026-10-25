@@ -235,11 +235,12 @@ final class InterpreterController: ObservableObject {
             liveStarted = false
             let s = LiveSession(waitForPause: waitForPause)
             live = s
-            s.onEvent = { [weak self] e in self?.liveEvent(e) }
-            s.onLevels = { [weak self] i, o in self?.liveLevels(i, o) }
-            s.onHoldChange = { [weak self] h in self?.liveHolding = h }
-            s.onRelease = { [weak self] dt in
-                guard let self else { return }
+            // Events from a stopped session must never touch the current one.
+            s.onEvent = { [weak self, weak s] e in guard let self, let s, self.live === s else { return }; self.liveEvent(e) }
+            s.onLevels = { [weak self, weak s] i, o in guard let self, let s, self.live === s else { return }; self.liveLevels(i, o) }
+            s.onHoldChange = { [weak self, weak s] h in guard let self, let s, self.live === s else { return }; self.liveHolding = h }
+            s.onRelease = { [weak self, weak s] dt in
+                guard let self, let s, self.live === s else { return }
                 let dir = self.turns.last.map { "\($0.source.code)→\($0.target.code)" } ?? "?"
                 if let id = self.liveSessionTurnID { self.update(id) { $0.metrics.tPlaybackStart = CFAbsoluteTimeGetCurrent() } }
                 self.latency.append(LatencySample(direction: dir, speechSec: 0, endToFirstSound: dt, endToClosed: nil))

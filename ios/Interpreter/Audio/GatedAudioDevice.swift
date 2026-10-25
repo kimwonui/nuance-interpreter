@@ -41,6 +41,10 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     private var noiseFloor: Float = 0.004
     private var voiceRun = 0
     private var silentQueued = 0 // consecutive silent samples queued while holding
+    /// Half-duplex echo guard: while NUA's voice plays (and 0.4 s after), the model receives silence instead
+    /// of the mic, so it can never hear and re-translate its own voice. Local cut-in detection still runs.
+    private var suppressUntil: Double = 0
+    private var lastReleaseEnd: Double = 0
 
     // Render-thread scratch (preallocated).
     private var pull = [Int16](repeating: 0, count: 8_192)
@@ -64,6 +68,20 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     var outputNumberOfChannels: Int { 1 }
     var outputLatency: TimeInterval { AVAudioSession.sharedInstance().outputLatency }
 
+    /// Clears queued NUA audio and gate state (new session / Stop), so nothing from a previous session plays.
+    func reset() {
+        os_unfair_lock_lock(&lock)
+        ring.clear()
+        releasing = false
+        lastVoice = 0
+        voiceRun = 0
+        silentQueued = 0
+        suppressUntil = 0
+        lastReleaseEnd = 0
+        os_unfair_lock_unlock(&lock)
+        holdingReported = false
+    }
+
     func initialize(with delegate: RTCAudioDeviceDelegate) -> Bool {
         adm = delegate
         isInitialized = true
@@ -81,10 +99,10 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     func initializePlayout() -> Bool { isPlayoutInitialized = setup(); return isPlayoutInitialized }
     func initializeRecording() -> Bool { isRecordingInitialized = setup(); return isRecordingInitialized }
 
-    func startPlayout() -> Bool { isPlaying = startEngine(); return isPlaying }
+    func startPlayout() -> Bool { reset(); isPlaying = startEngine(); return isPlaying }
     func startRecording() -> Bool { isRecording = startEngine(); return isRecording }
 
-    func stopPlayout() -> Bool { isPlaying = false; stopEngineIfIdle(); return true }
+    func stopPlayout() -> Bool { isPlaying = false; reset(); stopEngineIfIdle(); return true }
     func stopRecording() -> Bool { isRecording = false; stopEngineIfIdle(); return true }
 
     // MARK: Engine
@@ -177,6 +195,10 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         let rms = sqrt(sum / Float(n))
         lastMic = rms
         detectSpeech(rms: rms, frames: n)
+        os_unfair_lock_lock(&lock)
+        let suppress = releasing || CFAbsoluteTimeGetCurrent() < suppressUntil
+        os_unfair_lock_unlock(&lock)
+        if suppress { memset(ch[0], 0, n * 2) } // the model hears silence while NUA talks
 
         var flags = AudioUnitRenderActionFlags()
         var ts = AudioTimeStamp()
@@ -199,9 +221,11 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
             if voiceRun >= needed {
                 lastVoice = now
                 if playing {
-                    // Cut-in: stop NUA and drop what was queued; the model also stops when interrupted.
+                    // Cut-in: stop NUA, drop what was queued, and let the mic through right away.
                     ring.clear()
                     releasing = false
+                    suppressUntil = 0
+                    lastReleaseEnd = now
                 }
             }
         } else {
@@ -249,13 +273,15 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         let quietFor = now - lastVoice
         if !releasing, !ring.isEmpty, quietFor >= holdSeconds {
             releasing = true
-            released = quietFor
+            // Report once per turn (a turn's audio can arrive in several pieces).
+            if now - lastReleaseEnd > 1.0 { released = quietFor }
         }
         if releasing {
+            suppressUntil = now + 0.4
             let got = ring.read(into: dst, count)
             for i in 0..<got { outSum += dst[i] * dst[i] }
             if got < count { for i in got..<count { dst[i] = 0 } }
-            if ring.isEmpty && !pulledVoiced { releasing = false }
+            if ring.isEmpty && !pulledVoiced { releasing = false; lastReleaseEnd = now }
         } else {
             for i in 0..<count { dst[i] = 0 }
         }
