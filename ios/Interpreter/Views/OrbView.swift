@@ -27,6 +27,8 @@ struct OrbView: View {
 
     var body: some View {
         ZStack {
+            // The canvas is twice the orb's size so the blurred glow and highlight fade out completely instead of
+            // being cut off at a square edge. Layout and the tap area stay the orb's own size.
             TimelineView(.animation(paused: mode == .disabled && driver.settled)) { tl in
                 Canvas { gc, size in
                     let t = tl.date.timeIntervalSinceReferenceDate
@@ -34,6 +36,8 @@ struct OrbView: View {
                     draw(&gc, size: size, f: f)
                 }
             }
+            .frame(width: diameter * 2, height: diameter * 2)
+            .allowsHitTesting(false) // the overflow must not block the language buttons around the orb
             if mode == .disabled {
                 Image(systemName: "mic.slash")
                     .font(.system(size: 34, weight: .semibold))
@@ -42,6 +46,7 @@ struct OrbView: View {
             }
         }
         .frame(width: diameter, height: diameter)
+        .contentShape(Circle())
         .accessibilityElement()
         .accessibilityLabel(accessibilityText)
         .accessibilityAddTraits(.updatesFrequently)
