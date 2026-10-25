@@ -85,7 +85,7 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     /// Notification sounds, synthesized once. Mixed into NUA's own output (so Apple's echo canceller removes them
     /// from the mic) while the model gets silence and the speech detector ignores the mic (so a chime can never
     /// count as someone speaking or cut NUA off).
-    enum Chime { case start, heard }
+    enum Chime { case start, yourTurn }
     private static func tones(_ notes: [(freq: Double, at: Double)], length: Double, amp: Float) -> [Float] {
         var out = [Float](repeating: 0, count: Int(rate * length))
         for note in notes {
@@ -97,16 +97,17 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         }
         return out
     }
-    /// Start: two rising notes. Heard (NUA starts interpreting): one short soft ding.
+    /// Start: two rising notes. Your turn (NUA finished speaking a translation): one short soft ding.
     private static let startChime = tones([(1046.5, 0), (1568.0, 0.09)], length: 0.34, amp: 0.16)
-    private static let heardChime = tones([(1318.5, 0)], length: 0.2, amp: 0.12)
+    private static let yourTurnChime = tones([(1318.5, 0)], length: 0.2, amp: 0.12)
     private var chime: [Float] = []
     private var chimePos = 0
-    /// Ding when the next turn is released (set by the controller only when the speaking language changed).
-    private var dingArmed = false
+    /// Ding when NUA finishes speaking a translation, so the other person knows it's their turn (two-way only;
+    /// set per session by the controller, kept across resets).
+    private var turnEndChime = false
 
-    func armHeardChime(_ on: Bool) {
-        os_unfair_lock_lock(&lock); dingArmed = on; os_unfair_lock_unlock(&lock)
+    func setTurnEndChime(_ on: Bool) {
+        os_unfair_lock_lock(&lock); turnEndChime = on; os_unfair_lock_unlock(&lock)
     }
     private var chimeUntil: Double = 0 // speech detection ignores the mic until then (chime + echo tail)
 
@@ -117,7 +118,7 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     }
 
     private func startChimeLocked(_ c: Chime) {
-        chime = c == .start ? Self.startChime : Self.heardChime
+        chime = c == .start ? Self.startChime : Self.yourTurnChime
         chimePos = 0
         let until = CFAbsoluteTimeGetCurrent() + Double(chime.count) / Self.rate + 0.15
         chimeUntil = until
@@ -178,7 +179,6 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         chime = []
         chimePos = 0
         chimeUntil = 0
-        dingArmed = false
         earlyAudio = false
         pausedAt = 0
         discarding = false
@@ -506,12 +506,7 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
             if voiceSinceTurn {
                 voiceSinceTurn = false
                 // Report once per turn (a turn's audio can arrive in several pieces).
-                if now - lastReleaseEnd > 1.0 {
-                    released = quietFor
-                    releasedEarly = wasEarly
-                    // "Heard you": only when the speaking language changed since the last turn (armed by the controller).
-                    if dingArmed { startChimeLocked(.heard); dingArmed = false }
-                }
+                if now - lastReleaseEnd > 1.0 { released = quietFor; releasedEarly = wasEarly }
             }
         } else if !releasing, !ring.isEmpty, !voiceSinceTurn, !continuation, now - heldSince > 1.5 {
             // NUA started talking with no detected speech before it: never play it.
@@ -534,6 +529,8 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
                 turnDone = (Double(turnPlayed) / Self.rate, Double(turnSkipped) / Self.rate)
                 turnPlayed = 0
                 turnSkipped = 0
+                // NUA finished this translation (not a cut-in or a discarded answer): "your turn".
+                if turnEndChime { startChimeLocked(.yourTurn) }
             }
         } else {
             for i in 0..<count { dst[i] = 0 }

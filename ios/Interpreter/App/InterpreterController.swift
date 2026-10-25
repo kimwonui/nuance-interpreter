@@ -135,7 +135,6 @@ final class InterpreterController: ObservableObject {
     private var live: LiveSession?
     private var liveInput = ""          // source transcript since the last interpretation
     private var liveOneWay = false      // the running session's direction (fixed at Start)
-    private var liveLastSource: Lang?   // source language of the last interpreted turn (for the language-change ding)
     private var liveSessionTurnID: UUID?
     private var liveLastOut: Double = 0
     private var liveLastLoudIn: Double = 0
@@ -279,7 +278,8 @@ final class InterpreterController: ObservableObject {
             liveSessionTurnID = nil
             liveStarted = false
             liveOneWay = isOneWay
-            liveLastSource = nil
+            // Two-way: ding when NUA finishes a translation so the other person knows to answer.
+            LiveSession.gatedDevice.setTurnEndChime(!liveOneWay)
             let s = LiveSession(waitForPause: waitForPause)
             live = s
             // Events from a stopped session must never touch the current one.
@@ -343,12 +343,7 @@ final class InterpreterController: ObservableObject {
             if liveSessionTurnID != nil, now - liveLastOut > 1.5 { liveSessionTurnID = nil; liveInput = "" }
             liveInput += d
             if let id = liveSessionTurnID { update(id) { $0.sourceText += d } }
-            if let lang = Lang.detect(liveInput, among: (leftLang, rightLang)) {
-                speakerSide = side(of: lang); turnSide = speakerSide
-                // Ding when this turn is released only if the other language is now being spoken (not on the first
-                // turn — the start chime covers that — and never in one-way, where the language doesn't change).
-                LiveSession.gatedDevice.armHeardChime(!liveOneWay && liveLastSource != nil && lang != liveLastSource)
-            }
+            if let lang = Lang.detect(liveInput, among: (leftLang, rightLang)) { speakerSide = side(of: lang); turnSide = speakerSide }
         case .outputText(let d):
             let newTurn = liveSessionTurnID == nil || now - liveLastOut > 1.5
             // With the pause gate on, a new turn needs speech detected after the previous turn;
@@ -360,7 +355,6 @@ final class InterpreterController: ObservableObject {
                 let other: (Lang) -> Lang = { $0 == pair.0 ? pair.1 : pair.0 }
                 // One-way: always my language → theirs.
                 let src = liveOneWay ? pair.0 : Lang.detect(liveInput, among: pair) ?? Lang.detect(d, among: pair).map(other) ?? pair.0
-                liveLastSource = src
                 var t = Turn(source: src, target: other(src))
                 t.status = .playing
                 t.sourceText = liveInput.trimmingCharacters(in: .whitespacesAndNewlines)
