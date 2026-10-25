@@ -2,7 +2,9 @@
 
 Product site for NUA: a 3D iPhone showing the app's real hands-free screen, a scroll story of how two people use one phone, and an interactive walkthrough of the orb states. English copy, light theme only.
 
-Static HTML/CSS/JS. No dependencies, no build step, no analytics. Not deployed anywhere.
+Static HTML/CSS/JS. No dependencies, no build step, no analytics.
+
+Live at https://nuatranslator.com (www redirects to it).
 
 ## Preview
 
@@ -15,6 +17,13 @@ npm run check      # syntax, links/assets, no network/mic/audio code, language l
 `index.html` also opens straight from disk (classic scripts, no modules). Only the Noto Sans web font is loaded from Google Fonts; without a connection it falls back to the system font.
 
 Test switches: `?reduced` forces the reduced-motion version, `?lite` forces the low-power version.
+
+## Deployment
+
+- Host: Vercel project `nua-website` (Hobby), separate from the `nua-token` server project.
+- Domain: `nuatranslator.com` (Namecheap BasicDNS). Records: `@` A `216.198.79.1`, `www` CNAME `41044c83b77ffb08.vercel-dns-017.com.`. `www` redirects to the apex (308). Certificate: Let's Encrypt, issued and renewed by Vercel.
+- Only `index.html` and `assets/` are public; `.vercelignore` keeps `scripts/`, `README.md`, `package.json` and local `.env*` files out of the upload.
+- Every production deploy needs the owner's explicit approval first. Run `npm run check`, then from `website/`: `vercel deploy --prod`.
 
 ## Layout
 
