@@ -82,6 +82,8 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     private var earlyAudio = false
     /// NUA paused by the user's voice, waiting for a confirmed cut-in or a resume (0 = not paused).
     private var pausedAt: Double = 0
+    /// Wrong-direction output was cut: ignore NUA's audio until the next detected speech.
+    private var discarding = false
     private var turnPlayed = 0
     private var turnSkipped = 0
     /// Last 0.8 s of the REAL mic (before muting), kept on the mic thread. On a cut-in the muted part of the
@@ -133,12 +135,26 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         heldSince = 0
         earlyAudio = false
         pausedAt = 0
+        discarding = false
         turnPlayed = 0
         turnSkipped = 0
         micSamples = 0
         renderSamples = 0
         os_unfair_lock_unlock(&lock)
         holdingReported = false
+    }
+
+    /// Stop NUA now and drop its queued and still-arriving audio until someone speaks again (one-way mode, when
+    /// NUA answered or translated the other person).
+    func discardUntilVoice() {
+        os_unfair_lock_lock(&lock)
+        ring.clear()
+        releasing = false
+        pausedAt = 0
+        earlyAudio = false
+        voiceSinceTurn = false
+        discarding = true
+        os_unfair_lock_unlock(&lock)
     }
 
     func initialize(with delegate: RTCAudioDeviceDelegate) -> Bool {
@@ -356,7 +372,7 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         } else if voiceRun >= needed {
             // "Last speech" = an actually voiced moment, not the tail of the counter.
             if voiced { lastVoice = now }
-            if !voiceSinceTurn { voiceSinceTurn = true; newVoice = true }
+            if !voiceSinceTurn { voiceSinceTurn = true; newVoice = true; discarding = false }
             // Still talking while NUA's audio waits → that audio was early (mid-sentence): wait longer for it.
             if !playing, !paused, !ring.isEmpty { earlyAudio = true }
             if playing || paused {
@@ -413,7 +429,9 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         // skipping silence to drain a backlog squeezed the gaps between words and phrases and made NUA sound
         // rushed. Leading silence is not queued (latency, not rhythm); when caught up, silence plays as is.
         let quietFor = now - lastVoice
-        if pulledVoiced {
+        if discarding {
+            // Cut output (one-way wrong direction): drop the rest of that response.
+        } else if pulledVoiced {
             if ring.isEmpty, !releasing, pausedAt == 0 { earlyAudio = quietFor < 0.15 } // began while they talked?
             pull.withUnsafeBufferPointer { ring.write($0.baseAddress!, count) }
             silentQueued = 0

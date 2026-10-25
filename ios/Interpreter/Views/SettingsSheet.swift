@@ -37,7 +37,7 @@ struct SettingsSheet: View {
                 }
 
                 group("Conversation", note: controller.mode == .auto
-                      ? "Hands-free: tap Start once. NUA detects which of the two chosen languages is spoken and interprets when the speaker pauses. Very short replies may not be interpreted."
+                      ? "Hands-free: tap the orb once. Two-way detects which of the two chosen languages is spoken; One-way interprets only your language. NUA speaks when the speaker pauses. Very short replies may not be interpreted."
                       : "Push to talk: tap your language, speak, then tap Done.") {
                     Picker("Conversation", selection: $controller.mode) {
                         Text("Hands-free").tag(InterpreterController.Mode.auto)

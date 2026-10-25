@@ -46,16 +46,34 @@ final class InterpreterController: ObservableObject {
     /// Who is talking right now, from the source transcript's language (nil = unknown).
     @Published private(set) var speakerSide: Side?
     func side(of lang: Lang?) -> Side? { lang == leftLang ? .me : lang == rightLang ? .them : nil }
+    /// Hands-free direction. Two-way: both chosen languages, automatically. One-way: only my language (bottom)
+    /// → their language (top); speech in their language gets no output (for one phone per person).
+    enum Direction: String { case twoWay, oneWay }
+    @Published var direction: Direction = Direction(rawValue: UserDefaults.standard.string(forKey: "liveDirection") ?? "") ?? .twoWay {
+        didSet { UserDefaults.standard.set(direction.rawValue, forKey: "liveDirection") }
+    }
+    /// The deployed server accepts one-way sessions (GET /api/languages lists it).
+    @Published private(set) var oneWayAvailable = false
+    var isOneWay: Bool { mode == .auto && direction == .oneWay && oneWayAvailable }
+    /// Change direction only while stopped, so a running session never keeps the other direction's instructions.
+    func setDirection(_ d: Direction) {
+        guard autoState == .off, d == .twoWay || oneWayAvailable else { return }
+        direction = d
+    }
     /// The chosen pair includes a language the interpreter model can't speak (Arabic): GPT-Live only.
     var pairNeedsLive: Bool { leftLang.liveOnly || rightLang.liveOnly }
     private var liveOnlyName: String { (leftLang.liveOnly ? leftLang : rightLang).name }
     /// Why the current settings can't run the chosen pair (shown instead of starting), or nil.
     var engineLimit: String? {
+        if isOneWay, !pairNeedsLive, engine == .translate { return "One-way works only with GPT-Live. Switch the hands-free engine to GPT-Live in Settings." }
         guard pairNeedsLive else { return nil }
         if mode == .manual { return "Push to talk can't speak \(liveOnlyName). Use Hands-free with GPT-Live." }
         if engine == .translate { return "\(liveOnlyName) works only with GPT-Live. Switch the hands-free engine to GPT-Live in Settings." }
         return nil
     }
+    /// GPT-Live is required (Arabic, or one-way): never fall back to the interpreter model.
+    private var needsLive: Bool { pairNeedsLive || isOneWay }
+    private var needsLiveReason: String { pairNeedsLive ? "\(liveOnlyName) works only with GPT-Live" : "One-way works only with GPT-Live" }
     @Published private(set) var mic: Mic = .undetermined
     @Published private(set) var route = "iPhone speaker"
     @Published private(set) var level: Float = 0
@@ -116,6 +134,7 @@ final class InterpreterController: ObservableObject {
     private var autoEngine: AutoConversation!
     private var live: LiveSession?
     private var liveInput = ""          // source transcript since the last interpretation
+    private var liveOneWay = false      // the running session's direction (fixed at Start)
     private var liveSessionTurnID: UUID?
     private var liveLastOut: Double = 0
     private var liveLastLoudIn: Double = 0
@@ -258,6 +277,7 @@ final class InterpreterController: ObservableObject {
             liveInput = ""
             liveSessionTurnID = nil
             liveStarted = false
+            liveOneWay = isOneWay
             let s = LiveSession(waitForPause: waitForPause)
             live = s
             // Events from a stopped session must never touch the current one.
@@ -297,7 +317,7 @@ final class InterpreterController: ObservableObject {
             }
             s.start { [weak self] offer in
                 guard let self else { throw CancellationError() }
-                return try await self.tokens.liveAnswer(offer: offer, languages: [self.leftLang, self.rightLang])
+                return try await self.tokens.liveAnswer(offer: offer, languages: [self.leftLang, self.rightLang], oneWay: self.liveOneWay)
             }
         }
     }
@@ -331,7 +351,8 @@ final class InterpreterController: ObservableObject {
                 liveLastTurnAt = now
                 let pair = (leftLang, rightLang)
                 let other: (Lang) -> Lang = { $0 == pair.0 ? pair.1 : pair.0 }
-                let src = Lang.detect(liveInput, among: pair) ?? Lang.detect(d, among: pair).map(other) ?? pair.0
+                // One-way: always my language → theirs.
+                let src = liveOneWay ? pair.0 : Lang.detect(liveInput, among: pair) ?? Lang.detect(d, among: pair).map(other) ?? pair.0
                 var t = Turn(source: src, target: other(src))
                 t.status = .playing
                 t.sourceText = liveInput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -343,8 +364,18 @@ final class InterpreterController: ObservableObject {
             liveLastOut = now
             if let id = liveSessionTurnID {
                 update(id) { $0.targetText += d }
-                // Fix the direction once the output text shows its language.
-                if let t = turns.first(where: { $0.id == id }), let outLang = Lang.detect(t.targetText, among: (leftLang, rightLang)), outLang != t.target {
+                if liveOneWay, let t = turns.first(where: { $0.id == id }), t.targetText.count >= 12,
+                   Lang.detect(t.targetText, among: (leftLang, rightLang)) == leftLang {
+                    // One-way safety net: NUA is speaking my language, i.e. it translated (or answered) the other
+                    // person. Cut that audio and drop the turn; the gate stays closed until someone speaks again.
+                    LiveSession.gatedDevice.discardUntilVoice()
+                    turns.removeAll { $0.id == id }
+                    liveSessionTurnID = nil
+                    tokens.report(["mode": "live:wrong-dir"])
+                    return
+                }
+                // Fix the direction once the output text shows its language (two-way only).
+                if !liveOneWay, let t = turns.first(where: { $0.id == id }), let outLang = Lang.detect(t.targetText, among: (leftLang, rightLang)), outLang != t.target {
                     update(id) { $0.target = outLang; $0.source = outLang == self.leftLang ? self.rightLang : self.leftLang }
                 }
             }
@@ -362,9 +393,9 @@ final class InterpreterController: ObservableObject {
             liveStarted = false
             autoState = .off
             tokens.report(["mode": "live:failed", "route": String(msg.prefix(40))])
-            if wasStarting && pairNeedsLive {
-                // The interpreter model has no voice for this language: say so instead of switching silently.
-                connectionError = "GPT-Live unavailable (\(msg.prefix(60))). \(liveOnlyName) works only with GPT-Live, so NUA did not switch engines."
+            if wasStarting && needsLive {
+                // The interpreter model can't do this (Arabic voice / one-way): say so instead of switching silently.
+                connectionError = "GPT-Live unavailable (\(msg.prefix(60))). \(needsLiveReason), so NUA did not switch engines."
             } else if wasStarting {
                 // Live couldn't start (e.g. server not updated yet): fall back to the interpreter model.
                 engineNote = "GPT-Live unavailable (\(msg.prefix(60))). Using the interpreter model."
@@ -422,7 +453,9 @@ final class InterpreterController: ObservableObject {
 
     /// Reads the languages the deployed server accepts. If unavailable (older server), only Korean/English.
     func loadLanguages() async {
-        let langs = (try? await tokens.languages()) ?? [.ko, .en]
+        let info = try? await tokens.languages()
+        let langs = info?.langs ?? [.ko, .en]
+        oneWayAvailable = info?.oneWay ?? false
         availableLangs = langs.isEmpty ? [.ko, .en] : langs
         if !availableLangs.contains(leftLang) || !availableLangs.contains(rightLang) || leftLang == rightLang {
             leftLang = .ko
@@ -553,7 +586,7 @@ final class InterpreterController: ObservableObject {
     }
 
     func swapLanguages() {
-        guard phase == .idle else { return }
+        guard phase == .idle, autoState == .off else { return }
         (leftLang, rightLang) = (rightLang, leftLang)
     }
 

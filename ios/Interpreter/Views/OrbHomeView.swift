@@ -41,8 +41,7 @@ struct OrbHomeView: View {
                     .accessibilityHint(controller.canStart ? "Turns on the microphone and starts listening for \(controller.leftLang.name) or \(controller.rightLang.name)" : "")
                     .accessibilityAction { orbTapped() }
                 Text(status.title).font(.noto(16, .bold)).foregroundStyle(Theme.text)
-                Text("\(controller.leftLang.name) ↔ \(controller.rightLang.name)").font(.noto(12, .medium)).foregroundStyle(Theme.textSecondary)
-                    .accessibilityLabel("\(controller.leftLang.name) and \(controller.rightLang.name), both directions")
+                directionLine
                 statusAccessory.padding(.top, 4)
             }
             .animation(.easeInOut(duration: 0.2), value: status.title)
@@ -148,7 +147,7 @@ struct OrbHomeView: View {
                 if controller.phase == .playing { return ("Speaking" + (controller.speakingLanguage.map { " \($0.name)" } ?? ""), "Tap the orb to stop") }
                 if controller.engineLimit != nil { return ("Ready", "Mic off") }
                 if controller.connectionError != nil { return ("Not connected", "Tap to try again · Mic off") }
-                return ("Tap to start", "Mic off · Tap the orb or Start conversation")
+                return ("Tap to start", "Mic off · Tap the orb to start")
             case .connecting: return ("Connecting…", "Getting the interpreter ready")
             case .waiting, .hearing:
                 if controller.liveHolding { return ("Waiting for you to finish", "NUA speaks after a short pause") }
@@ -331,23 +330,50 @@ if controller.mode == .manual {
         .padding(.bottom, 4)
     }
 
-    /// Hands-free controls: one Start; while on, Mute and Stop are always visible.
+    /// "Korean ↔ English" (two-way) or "Korean → English" with a swap button (one-way, while stopped).
+    @ViewBuilder
+    private var directionLine: some View {
+        let l = controller.leftLang.name, r = controller.rightLang.name
+        if controller.isOneWay {
+            HStack(spacing: 6) {
+                Text("\(l) → \(r)").font(.noto(12, .medium)).foregroundStyle(Theme.textSecondary)
+                    .accessibilityLabel("One way, \(l) to \(r)")
+                if controller.autoState == .off {
+                    Button { controller.swapLanguages() } label: {
+                        Image(systemName: "arrow.left.arrow.right").font(.system(size: 11, weight: .bold)).foregroundStyle(Theme.accentText)
+                            .frame(width: 28, height: 22)
+                            .background(Theme.badge, in: Capsule())
+                    }
+                    .accessibilityLabel("Swap direction")
+                    .accessibilityHint("Interpret \(r) to \(l) instead")
+                }
+            }
+        } else {
+            Text("\(l) ↔ \(r)").font(.noto(12, .medium)).foregroundStyle(Theme.textSecondary)
+                .accessibilityLabel("\(l) and \(r), both directions")
+        }
+    }
+
+    /// Hands-free controls. Stopped: Two-way / One-way switch (the orb starts). Running: Mute and Stop, always
+    /// visible; the switch is hidden so a running session's direction can't change under it.
     @ViewBuilder
     private var autoControls: some View {
         if controller.autoState == .off {
-            Button { controller.startConversation() } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "mic.fill").font(.system(size: 15, weight: .bold))
-                    Text("Start conversation").font(.noto(17, .bold))
+            VStack(spacing: 4) {
+                Picker("Direction", selection: Binding(get: { controller.direction }, set: { controller.setDirection($0) })) {
+                    Text("Two-way").tag(InterpreterController.Direction.twoWay)
+                    Text("One-way").tag(InterpreterController.Direction.oneWay)
                 }
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity, minHeight: 64)
-                .background(Capsule().fill(Theme.gradient(scheme)))
-                .shadow(color: .black.opacity(0.2), radius: 10, y: 3)
+                .pickerStyle(.segmented)
+                .disabled(!controller.oneWayAvailable)
+                .frame(minHeight: 40)
+                .accessibilityHint(controller.direction == .oneWay ? "Only your language is interpreted" : "Both languages are interpreted")
+                Text(controller.oneWayAvailable
+                     ? (controller.direction == .oneWay ? "Only your language is interpreted · Tap the orb to start" : "Both languages · Tap the orb to start")
+                     : "One-way needs the NUA server update · Tap the orb to start")
+                    .font(.noto(10, .regular)).foregroundStyle(Theme.textSecondary).lineLimit(1).minimumScaleFactor(0.8)
             }
-            .buttonStyle(PressScale())
-            .disabled(controller.mic == .denied || controller.engineLimit != nil)
-            .accessibilityHint("Turns on the microphone and starts listening for \(controller.leftLang.name) or \(controller.rightLang.name)")
+            .frame(maxWidth: .infinity, minHeight: 64)
         } else {
             HStack(spacing: 12) {
                 Button { controller.toggleMute() } label: {

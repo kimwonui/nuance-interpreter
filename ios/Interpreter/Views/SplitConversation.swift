@@ -56,9 +56,11 @@ struct SideHalf: View {
         }
     }
 
+    private var oneWayListener: Bool { controller.isOneWay && side == .them }
+
     private var title: String {
         switch cue {
-        case .idle: return side == .me ? "You speak \(lang.name)" : "They speak \(lang.name)"
+        case .idle: return side == .me ? "You speak \(lang.name)" : (oneWayListener ? "They hear \(lang.name)" : "They speak \(lang.name)")
         case .yourTurn: return "Your turn"
         case .talking: return "Speaking \(lang.name)…"
         case .waitOther: return "Wait for them to finish"
@@ -69,7 +71,9 @@ struct SideHalf: View {
 
     private var subtitle: String {
         switch cue {
-        case .idle: return controller.autoState == .off ? (editable ? "Tap to change language" : "") : "Speak when ready"
+        case .idle:
+            if controller.autoState == .off { return editable ? "Tap to change language" : "" }
+            return oneWayListener ? "One-way: only \(otherLang.name) is interpreted" : "Speak when ready"
         case .yourTurn: return "Speak \(lang.name)"
         case .talking: return "NUA will interpret when you pause"
         case .waitOther: return "They are speaking \(otherLang.name)"
