@@ -188,6 +188,12 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     }
 
     /// If playback is on the earpiece, switch to the built-in speaker (headphones/Bluetooth untouched).
+    /// Diagnostics: is Apple voice processing really on, and the current noise floor.
+    var diagnostics: String {
+        os_unfair_lock_lock(&lock); let nf = noiseFloor; os_unfair_lock_unlock(&lock)
+        return String(format: "vp %@ nf %.3f", engine.inputNode.isVoiceProcessingEnabled ? "on" : "off", nf)
+    }
+
     func ensureSpeaker() {
         let s = AVAudioSession.sharedInstance()
         guard s.currentRoute.outputs.contains(where: { $0.portType == .builtInReceiver }) else { return }
@@ -216,7 +222,7 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         lastMic = rms
         detectSpeech(rms: rms, frames: n)
         os_unfair_lock_lock(&lock)
-        let suppress = releasing || CFAbsoluteTimeGetCurrent() < suppressUntil
+        let suppress = CFAbsoluteTimeGetCurrent() < suppressUntil
         os_unfair_lock_unlock(&lock)
         if suppress { memset(ch[0], 0, n * 2) } // the model hears silence while NUA talks
 
@@ -244,7 +250,8 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
             voiceRun += frames
         } else {
             voiceRun = max(0, voiceRun - frames / 2)
-            if !playing { noiseFloor = min(0.03, noiseFloor * 0.98 + rms * 0.02) }
+            // Learn the room's noise only from clearly non-speech sound, so quiet speech is never learned as noise.
+            if !playing, rms < threshold * 0.5 { noiseFloor = min(0.02, noiseFloor * 0.995 + rms * 0.005) }
         }
         var cutIn: (Float, Float)?
         var newVoice = false
@@ -320,9 +327,11 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
             heldSince = 0
         }
         if releasing {
-            suppressUntil = now + 0.4
             let got = ring.read(into: dst, count)
             for i in 0..<got { outSum += dst[i] * dst[i] }
+            // Mute the model's mic input only while NUA is actually audible, plus a short echo-decay tail.
+            // (Muting for the whole "turn" cut the start of the user's reply.)
+            if got > 0, sqrt(outSum / Float(got)) > 0.004 { suppressUntil = now + 0.15 }
             if got < count { for i in got..<count { dst[i] = 0 } }
             // NUA's turn ends only after a real gap, not at every pause between its phrases.
             if ring.isEmpty && !pulledVoiced && now - lastNuaVoice > Self.turnGap { releasing = false; lastReleaseEnd = now }

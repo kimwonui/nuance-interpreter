@@ -265,7 +265,7 @@ final class InterpreterController: ObservableObject {
                 if let id = self.liveSessionTurnID { self.update(id) { $0.metrics.tPlaybackStart = CFAbsoluteTimeGetCurrent() } }
                 self.latency.append(LatencySample(direction: dir, speechSec: 0, endToFirstSound: dt, endToClosed: nil))
                 // Exact: last detected user speech → first released NUA audio (≥ 0.5 s by design).
-                self.tokens.report(["mode": "live:gated", "direction": dir, "endToFirstSound": dt, "route": AudioIO.routeName()])
+                self.tokens.report(["mode": "live:gated", "direction": dir, "endToFirstSound": dt, "route": LiveSession.gatedDevice.diagnostics])
             }
             s.start { [weak self] offer in
                 guard let self else { throw CancellationError() }
@@ -281,6 +281,13 @@ final class InterpreterController: ObservableObject {
             liveStarted = true
             autoState = .waiting
             tokens.report(["mode": "live:started", "route": AudioIO.routeName()])
+            if waitForPause {
+                // Evidence for noise issues: voice processing actually on? noise floor after a few seconds.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                    guard let self, self.live != nil else { return }
+                    self.tokens.report(["mode": "live:audio", "route": LiveSession.gatedDevice.diagnostics])
+                }
+            }
         case .inputText(let d):
             // New source speech after an interpretation finished starts a new turn.
             if liveSessionTurnID != nil, now - liveLastOut > 1.5 { liveSessionTurnID = nil; liveInput = "" }

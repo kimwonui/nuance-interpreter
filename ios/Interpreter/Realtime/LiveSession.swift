@@ -78,7 +78,16 @@ final class LiveSession: NSObject {
             onEvent?(.failed("Couldn't create the audio connection")); return
         }
         self.pc = pc
-        let source = factory.audioSource(with: constraints)
+        // In pause-gate mode Apple voice processing (same engine as playback, so its echo reference is exact)
+        // does echo cancellation and noise suppression. Turn off WebRTC's own software processing here: its
+        // echo reference would be the audio NUA pulled, not what actually played (held/dropped), and it could
+        // suppress the user's voice as "echo", especially in noise.
+        let audioConstraints = gated
+            ? RTCMediaConstraints(mandatoryConstraints: ["googEchoCancellation": "false", "googNoiseSuppression": "false",
+                                                         "googAutoGainControl": "false", "googHighpassFilter": "false"],
+                                  optionalConstraints: nil)
+            : constraints
+        let source = factory.audioSource(with: audioConstraints)
         let track = factory.audioTrack(with: source, trackId: "nua-mic")
         pc.add(track, streamIds: ["nua"])
         micTrack = track
