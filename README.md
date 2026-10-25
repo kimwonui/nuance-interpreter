@@ -1,66 +1,109 @@
-# 뉘앙스 통역 (가제)
+# NUA
 
-아이폰 한 대로 한국어 ↔ 영어 대화를 실시간 음성 통역하는 iOS 앱. 말한 사람의 의도·감정·말투를 최대한 살려 상대 언어 음성으로 들려준다.
-이름·번들 ID는 아직 정하지 않았다(지금은 `com.wonuik.interpreter.dev`). 길로그 정식 제품이 아니다.
+NUA is an iOS app for face-to-face, real-time voice interpretation between Korean and English on a single iPhone. It tries to carry each speaker's intent, emotion, and tone into speech in the other language. The name comes from the "Nua" in *Nuance*.
 
-- 디자인: 피그마 [뉘앙스 통역 (가제) — iOS UI/UX](https://www.figma.com/design/aNByF25oUVjYOFZn7o3i3B) (라이트 9 + 다크 9, 길로그 컬러스펙 v1.1 토큰 복제)
-- 통역 엔진: OpenAI `gpt-realtime-translate` (통역 전용 실시간 음성→음성, 분당 $0.034, 2026-10-24 공식 문서 기준)
+- Built for HackPSU. Not a Gillog product. Bundle ID stays `com.wonuik.interpreter.dev`.
+- UI language: English only. Korean is supported as an interpretation language (Korean speech in, Korean speech out).
+- Design: [Figma — NUA](https://www.figma.com/design/aNByF25oUVjYOFZn7o3i3B). Light frames are the source of truth; dark frames are preserved but no longer updated (since 2026-10-24). Visual tokens are copied from the Gillog color spec v1.1.
+- Engine: OpenAI `gpt-realtime-translate` (dedicated real-time speech-to-speech interpretation, $0.034 per minute per the official docs on 2026-10-24).
 
-## 구조
+## Layout
 
 ```
-ios/      SwiftUI 앱 (xcodegen 으로 프로젝트 생성)
-  Interpreter/Audio/AudioIO.swift              마이크 24kHz PCM16 100ms 조각 + 번역 음성 재생, 경로 변경·끊김 처리
-  Interpreter/Realtime/TranslationSocket.swift 발화 1회 = 통역 세션 1개 (웹소켓)
-  Interpreter/Realtime/TokenClient.swift       우리 서버에서 임시 키(또는 중계 입장권) 받기
-  Interpreter/App/InterpreterController.swift  듣기 → 말 끝 → 재생 흐름, 끼어들기, 다시 듣기, 재시도, 지연 측정
-server/   임시 키 발급 서버 (OpenAI 키는 여기에만)
-  api/session.mjs        Vercel 함수
-  dev-server.mjs         맥 로컬 개발 서버 (직접 / 중계 모드)
-  scripts/eval.mjs       시험 문장 15개로 품질·지연 측정
-docs/test-sentences.json 부정·질문·비꼼·존댓말·반말·강조·망설임·명령(실행 금지) 양방향 문장
+ios/      SwiftUI app (project generated with xcodegen)
+  Interpreter/Audio/AudioIO.swift              24 kHz PCM16 mic chunks (100 ms) + playback, route/interruption handling, output level tap
+  Interpreter/Audio/TestSignal.swift           on-device speech used only by the labeled test-signal mode
+  Interpreter/Realtime/TranslationSocket.swift one utterance = one interpretation session (WebSocket)
+  Interpreter/Realtime/TokenClient.swift       fetches a short-lived key (or relay ticket) from our server
+  Interpreter/App/InterpreterController.swift  listen → done → play flow, cut-in, replay, retry, latency metrics
+  Interpreter/Views/OrbView.swift              center orb (motion spec in Figma)
+server/   token server (the OpenAI key lives only here)
+  api/session.mjs        Vercel function
+  dev-server.mjs         local dev server for the Mac (direct / relay modes)
+  scripts/eval.mjs       quality and latency check with 15 test sentences
+docs/test-sentences.json negation, questions, sarcasm, honorifics, casual speech, emphasis, hesitation, commands (must not be executed), both directions
 ```
 
-## 동작 방식
+## Testing policy (owner decision, 2026-10-24)
 
-1. 말할 사람이 자기 언어 버튼을 누른다 → 원문 음성을 실시간으로 통역 세션에 보낸다(직전 0.3초 포함, 첫 음절 잘림 방지).
-2. 말하는 동안 들어오는 번역 음성은 **보류**한다(말하는 사람 위로 소리가 겹치지 않게).
-3. 같은 버튼을 다시 누르면(말 끝) `session.close` → 보류해 둔 번역부터 바로 재생, 남은 번역도 도착하는 대로 이어서 재생.
-4. 재생 중 아무 버튼이나 누르면 재생을 끊고 바로 새로 듣는다(끼어들기).
+- All testing is done by the owner on the owner's iPhone with the installed build.
+- No simulator runs, no scripted runs (`-autoDemo`, `-autoTurns`, `-autoStart`, `-localTest`), no synthetic-voice interpretation tests, and no one speaks into the device on the owner's behalf.
+- Engineering stops at: build → sign → install on the owner's iPhone → confirm the token server is reachable.
+- Function, quality, and speed are judged only from the owner's own tests and the technical logs they produce (numbers-only `/api/metrics` entries in the Vercel function log).
+- A successful build or install is never reported as "interpretation verified".
 
-- **재인식 루프 차단**: 버튼이 눌린 동안에만 마이크 음성을 보낸다. 재생 중에는 아무것도 보내지 않는다.
-- **동시 발화**: 한 번에 한 사람만 듣는다(상대 버튼은 잠김). 1차는 자동 화자 전환 대신 버튼 방식.
-- **저장 안 함**: 음성·대화는 파일로 저장하지 않는다. 다시 듣기·재시도용 음성은 메모리에만 있고 앱 종료 시 사라진다. 처리를 위해 OpenAI로 실시간 전송된다.
-- **API 키 비노출**: 앱은 서버에서 몇 분짜리 임시 키만 받는다.
+## Hands-free mode (default)
 
-## 서버 실행 (맥, 개발용)
+### Hands-free engines
+
+- **GPT-Live (default)** — `gpt-live-1`, OpenAI's full-duplex voice model for natural conversation with built-in turn-taking and interruptions ($0.05 per minute of open session, billed per second). There are no client secrets for Live, so the phone sends its WebRTC offer to `POST /api/live`; the server creates the session with the API key and **fixed interpreter instructions** (adapted from OpenAI's translation-only Live prompt, extended to Korean↔English) and returns the answer. Audio then flows directly between the phone and OpenAI; WebRTC provides echo cancellation. Uses Google WebRTC via the `stasel/WebRTC` Swift package (154.0.0). The API model is `gpt-live-1`; it is not claimed to be identical to the ChatGPT Live app.
+- **Interpreter model** — the two-session `gpt-realtime-translate` design below. Used automatically if a Live session can't start.
+
+
+1. Tap **Start conversation** — this is the only thing that turns the mic on (nothing records at launch). The iOS mic indicator shows the real state; **Mute** turns the mic engine off, **Stop** ends everything.
+2. NUA keeps two interpretation sessions open (→English and →Korean) and listens with a local voice detector. Audio is sent only while someone speaks (0.5 s pre-roll so the first syllable isn't lost, 1.5 s tail), never during silence.
+3. The →English session also returns the source transcript (`gpt-4o-mini-transcribe`, enabled from the client). Hangul vs. Latin letters decides the direction; the matching session's audio plays, the other is dropped. Fallback without a transcript: which session produced speech.
+4. While NUA talks, the mic isn't streamed (no feedback loop). Echo cancellation is on; speaking loudly over NUA for 0.4 s cuts it off. If a new transcript matches what NUA just said, it's treated as echo and ignored.
+5. Push to talk remains in Settings → Conversation.
+
+Known limits: the model has one output language per session and no detected-language event (hence two sessions, ~2× audio minutes while someone speaks); very short replies (e.g. "네, 좋아요.") may get no translation because the model waits for more context; pauses longer than 0.7 s end an utterance (a resumed sentence within 2 s before any output is merged back).
+
+## Screen (V2, orb-centered)
+
+The orb is the hero from first launch. Captions and history are secondary; the only controls are two speaker pills.
+
+| State | Orb | Driven by |
+|---|---|---|
+| Ready | slow 4 s breathing | nothing (text says "Mic off") |
+| Listening | grows and wobbles, response rings | real microphone level |
+| Interpreting | rotating angular gradient + orbit dots | nothing |
+| Playing | grows and wobbles, ripples | real playback level (player-node tap) |
+| Stopped / error / no permission | static grey | nothing ("Not listening") |
+
+- Reduce Motion: no rotation, ripples, or breathing; level is shown by size only.
+- Microphone permission is requested the first time someone taps a speaker pill.
+- Settings → Screen switches to the previous card layout (V1) for comparison.
+- Launch argument `-localTest`: no server; real microphone input plus an on-device "TEST SIGNAL" voice played through the real playback path, to check the orb and audio path. It does **not** interpret, and the screen says so. `-autoDemo`: same mode with scripted taps, for recording.
+
+## How it works
+
+1. The speaker taps their language → mic audio streams to the interpretation session (including the previous 0.3 s so the first syllable isn't lost).
+2. Translated audio that arrives while they are still talking is **held** so it doesn't play over them.
+3. Tapping Done sends `session.close` → held audio plays immediately, the rest plays as it arrives.
+4. Tapping any pill during playback stops it and starts listening right away (cut-in).
+
+- **No feedback loop**: mic audio is only sent while a pill is active; nothing is sent during playback.
+- **One speaker at a time**: the other pill is locked while someone is talking. v1 uses buttons, not automatic speaker detection.
+- **Nothing saved**: audio and conversations are never written to disk. Audio kept for Replay/Retry lives in memory and disappears when the app closes. Audio is streamed to OpenAI for processing.
+- **No API key in the app**: the app only receives a key that expires in a few minutes.
+
+## Run the server (Mac, development)
 
 ```bash
 cd server
 npm install
-cp .env.example .env.local   # OPENAI_API_KEY 입력
-npm run dev                  # 임시 키로 앱이 OpenAI 에 직접 연결
-npm run dev:relay            # 직접 연결이 막힐 때: 아이폰 ↔ 맥 ↔ OpenAI 중계
-npm run eval                 # 시험 문장 품질·지연 측정 (결과: server/eval-out/)
+cp .env.example .env.local   # add OPENAI_API_KEY
+npm run dev                  # app connects to OpenAI directly with a short-lived key
+npm run dev:relay            # fallback if direct WebSocket auth is rejected: iPhone ↔ Mac ↔ OpenAI
+npm run eval                 # quality + latency on the test sentences (results in server/eval-out/)
 ```
 
-배포용은 `server/api/session.mjs` 를 Vercel 에 올리고 환경 변수 `OPENAI_API_KEY`(필수), `APP_SHARED_SECRET`(선택)을 넣는다.
+Production token server: `https://nua-token.vercel.app` (Vercel project `nua-token`, functions `api/session` and `api/metrics`). Env vars: `OPENAI_API_KEY` and `APP_SHARED_SECRET` (both required, server-only). GitHub auto-deploy is disconnected; deploys are manual and owner-approved.
 
-## 아이폰 설치
+## Install on an iPhone (development)
 
-1. `ios/Interpreter/Config/Secrets.example.xcconfig` 를 `Secrets.xcconfig` 로 복사 → `DEVELOPMENT_TEAM`, `INTERPRETER_SERVER_URL`(맥 IP:8787) 입력
+1. Copy `ios/Interpreter/Config/Secrets.example.xcconfig` to `Secrets.xcconfig` and set `DEVELOPMENT_TEAM` and `INTERPRETER_SERVER_URL` (Mac IP:8787).
 2. `cd ios && xcodegen generate`
-3. 아이폰을 맥에 연결(또는 같은 와이파이 페어링) + 개발자 모드 켜기
+3. Connect the iPhone (USB or paired Wi-Fi) with Developer Mode on. Xcode must be signed in to the Apple ID (Xcode → Settings → Accounts) and the team's agreements must be accepted.
 4. ```bash
    xcodebuild -project Interpreter.xcodeproj -scheme Interpreter -configuration Debug \
-     -destination 'platform=iOS,id=<기기 ID>' -derivedDataPath build -allowProvisioningUpdates build
-   xcrun devicectl device install app --device <기기 ID> build/Build/Products/Debug-iphoneos/Interpreter.app
+     -destination 'platform=iOS,id=<device UDID>' -derivedDataPath build -allowProvisioningUpdates build
+   xcrun devicectl device install app --device <device id> build/Build/Products/Debug-iphoneos/Interpreter.app
    ```
-   (Xcode 에서 열어 ▶ 눌러도 된다.)
 
-## 한계 (정직하게)
+## Known limits
 
-- 엔진은 말투·감정 지시를 받지 않는다. 대신 원문 화자의 말투·높낮이를 따라가도록 학습돼 있다(공식 설명). 실제 보존 정도는 사람 음성으로 따로 검증해야 한다.
-- 출력 목소리는 고를 수 없고 화자에 맞춰 바뀐다. **본인 음색 복제가 아니다.**
-- 같은 언어로 말하면(예: 한국어 버튼 누르고 한국어 출력 방향) 소리가 안 나올 수 있다 → 카드에 "통역할 말이 없음" 표시.
-- 속도는 측정 전까지 보장하지 않는다. `eval` 과 앱 설정의 "지연 시간 표시"로 잰다.
+- The engine takes no tone or style instructions. Per OpenAI, it is trained to follow the source speaker's tone and pitch. How well nuance survives must be checked with real human speech.
+- The output voice can't be chosen and adapts to the speaker. **It is not a clone of the user's voice.**
+- Speaking the output language (e.g. English into the Korean→English direction) may produce silence; the UI shows "Nothing to interpret".
+- Speed is not guaranteed until measured. Use `npm run eval` and Settings → Show latency.

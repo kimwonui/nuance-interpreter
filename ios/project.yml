@@ -1,0 +1,53 @@
+# xcodegen generate → creates Interpreter.xcodeproj (generated project is not committed)
+name: Interpreter
+options:
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+packages:
+  WebRTC:
+    url: https://github.com/stasel/WebRTC
+    exactVersion: 154.0.0
+configFiles:
+  Debug: Interpreter/Config/App.xcconfig
+  Release: Interpreter/Config/App.xcconfig
+targets:
+  Interpreter:
+    type: application
+    platform: iOS
+    dependencies:
+      - package: WebRTC
+    sources:
+      - path: Interpreter
+        excludes:
+          - "Config/**"
+    info:
+      path: Interpreter/Info.plist
+      properties:
+        CFBundleDisplayName: NUA
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        UILaunchScreen:
+          UIColorName: ""
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIRequiresFullScreen: true
+        NSMicrophoneUsageDescription: NUA uses the microphone to interpret what you say. Audio is not saved.
+        NSLocalNetworkUsageDescription: During development, NUA connects to the interpretation server on your local network.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        UIAppFonts:
+          - NotoSansKR_400Regular.ttf
+          - NotoSansKR_500Medium.ttf
+          - NotoSansKR_700Bold.ttf
+        InterpreterServerURL: $(INTERPRETER_SERVER_URL)
+        InterpreterAppKey: $(INTERPRETER_APP_KEY)
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID)
+        DEVELOPMENT_TEAM: $(DEVELOPMENT_TEAM)
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_USER_SCRIPT_SANDBOXING: YES
+        GENERATE_INFOPLIST_FILE: NO
