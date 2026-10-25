@@ -3,7 +3,7 @@
 //   node scripts/serve.mjs [port]
 import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
-import { watch } from "node:fs";
+import { watch, createReadStream } from "node:fs";
 import { extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,6 +19,7 @@ const types = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
   ".webp": "image/webp",
+  ".mp4": "video/mp4",
   ".ico": "image/x-icon",
 };
 const reloadSnippet = `<script>(()=>{const s=new EventSource("/__reload");s.onmessage=()=>location.reload();})();</script>`;
@@ -43,12 +44,29 @@ createServer(async (req, res) => {
   let path = normalize(join(root, decodeURIComponent(url.pathname)));
   if (!path.startsWith(root)) return void res.writeHead(403).end();
   try {
-    if ((await stat(path)).isDirectory()) path = join(path, "index.html");
-    let body = await readFile(path);
+    let info = await stat(path);
+    if (info.isDirectory()) { path = join(path, "index.html"); info = await stat(path); }
     const type = types[extname(path)] || "application/octet-stream";
-    if (type.startsWith("text/html")) body = body.toString().replace("</body>", reloadSnippet + "</body>");
-    res.writeHead(200, { "Content-Type": type, "Cache-Control": "no-store" });
-    res.end(body);
+    if (type.startsWith("text/html")) {
+      const body = (await readFile(path)).toString().replace("</body>", reloadSnippet + "</body>");
+      res.writeHead(200, { "Content-Type": type, "Cache-Control": "no-store" });
+      return void res.end(body);
+    }
+    // Byte ranges, so Safari can play the videos like it would from the real host.
+    const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || "");
+    const headers = { "Content-Type": type, "Cache-Control": "no-store", "Accept-Ranges": "bytes" };
+    if (range) {
+      let start = range[1] ? Number(range[1]) : info.size - Number(range[2]);
+      let end = range[1] && range[2] ? Math.min(Number(range[2]), info.size - 1) : info.size - 1;
+      if (!(start >= 0) || start > end) {
+        res.writeHead(416, { "Content-Range": `bytes */${info.size}` });
+        return void res.end();
+      }
+      res.writeHead(206, { ...headers, "Content-Range": `bytes ${start}-${end}/${info.size}`, "Content-Length": end - start + 1 });
+      return void createReadStream(path, { start, end }).pipe(res);
+    }
+    res.writeHead(200, { ...headers, "Content-Length": info.size });
+    createReadStream(path).pipe(res);
   } catch {
     res.writeHead(404, { "Content-Type": "text/plain" }).end("Not found");
   }
