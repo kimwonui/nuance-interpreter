@@ -133,20 +133,29 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         suppressUntil = max(suppressUntil, until)
     }
 
-    /// The speaker tapped "I'm done" (orb). Releases held audio at once and lets the next audio of this turn play
-    /// without waiting for the pause. Expires if they start talking again or after 6 s.
+    /// The speaker tapped "I'm done" (orb) — also mid-sentence. Releases held audio at once and lets the next audio
+    /// of this turn play without waiting for a pause, even if the mic still hears voice. Expires after 6 s.
     private var userDoneAt: Double = 0
+    /// After a "done" tap the model hears silence instead of the mic (up to 4 s, until NUA starts speaking): the turn
+    /// ends at the tap, and silence after speech is what GPT-Live's own turn-taking listens for.
+    private var tapMuteUntil: Double = 0
     enum FinishResult { case releasedHeld, waitingForModel, nothingHeard }
+    struct FinishInfo { let result: FinishResult; let quietFor: Double; let heldSec: Double }
 
-    func finishTurn() -> FinishResult {
+    /// `heardByModel`: the model's own input transcript has text since the last turn — proof that real speech
+    /// reached it even if this phone's detector (0.15 s above the noise bar) didn't count it as speech.
+    func finishTurn(heardByModel: Bool) -> FinishInfo {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
         let now = CFAbsoluteTimeGetCurrent()
         let continuation = lastReleaseEnd > 0 && now - lastReleaseEnd < 2.0
+        if !voiceSinceTurn, heardByModel { voiceSinceTurn = true }
+        let info = { (r: FinishResult) in FinishInfo(result: r, quietFor: now - self.lastVoice, heldSec: Double(self.ring.count) / Self.rate) }
         // Never release what nobody said (same rule as the gate).
-        guard voiceSinceTurn || continuation || pausedAt > 0 else { return .nothingHeard }
+        guard voiceSinceTurn || continuation || pausedAt > 0 else { return info(.nothingHeard) }
         userDoneAt = now
-        return ring.isEmpty && pausedAt == 0 ? .waitingForModel : .releasedHeld
+        tapMuteUntil = now + 4
+        return info(ring.isEmpty && pausedAt == 0 ? .waitingForModel : .releasedHeld)
     }
 
     /// Wrong-direction output was cut: ignore NUA's audio until the next detected speech.
@@ -201,6 +210,7 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         voiceSinceTurn = false
         heldSince = 0
         userDoneAt = 0
+        tapMuteUntil = 0
         chime = []
         chimePos = 0
         chimeUntil = 0
@@ -372,7 +382,8 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         micSamples += n
         // Paused by the user's voice: keep the model muted until it's a confirmed cut-in, so a false alarm
         // (e.g. NUA's own echo) never reaches the model.
-        let suppress = CFAbsoluteTimeGetCurrent() < suppressUntil || pausedAt > 0
+        let tNow = CFAbsoluteTimeGetCurrent()
+        let suppress = tNow < suppressUntil || pausedAt > 0 || tNow < tapMuteUntil
         let flush = flushPreRoll
         flushPreRoll = false
         os_unfair_lock_unlock(&lock)
@@ -454,6 +465,7 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
                 // Confirmed cut-in: stop NUA, drop what was queued, and let the mic through right away.
                 ring.clear()
                 userDoneAt = 0
+                tapMuteUntil = 0
                 releasing = false
                 pausedAt = 0
                 earlyAudio = false
@@ -522,13 +534,14 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         let continuation = lastReleaseEnd > 0 && now - lastReleaseEnd < 2.0
         let hold = earlyAudio ? earlyHoldSeconds : holdSeconds
         var dropped: Double?
-        // "Done" tap still valid: not expired and they haven't started talking again since.
-        let userDone = userDoneAt > 0 && now - userDoneAt < 6 && lastVoice < userDoneAt + 0.3
+        // "Done" tap still valid (6 s). Not cancelled by voice: tapping mid-sentence means "this turn ends now".
+        let userDone = userDoneAt > 0 && now - userDoneAt < 6
         if pausedAt > 0 {
             // Paused by a voice that never became a cut-in (a short sound or echo): resume after a short quiet.
-            if quietFor >= 0.3 || userDone { pausedAt = 0; releasing = true; voiceRun = 0; userDoneAt = 0 }
+            if quietFor >= 0.3 || userDone { pausedAt = 0; releasing = true; voiceRun = 0; userDoneAt = 0; tapMuteUntil = 0 }
         } else if !releasing, !ring.isEmpty, quietFor >= hold || userDone, voiceSinceTurn || continuation {
             userDoneAt = 0
+            tapMuteUntil = 0 // NUA is speaking now; the usual echo guard takes over
             releasing = true
             voiceRun = 0 // the speaker's leftover count must not read as talking over NUA's first syllable
             let wasEarly = earlyAudio

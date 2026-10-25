@@ -120,13 +120,16 @@ final class LiveSession: NSObject {
         }
     }
 
+    /// Diagnostics: the type name of each data-channel event we don't handle, once per session (no content).
+    var onUnhandledEvent: ((String) -> Void)?
+    private var seenTypes = Set<String>()
     private var nudgeCount = 0
     /// The speaker said they're done (orb tap) and no translation has started: ask the model, through the
     /// documented trusted-instruction event, to interpret now. Model behaviour — it may still wait or answer late.
     func nudgeInterpretNow() {
         nudgeCount += 1
         send(["type": "session.instructions.append", "event_id": "nua_finish_\(nudgeCount)", "delegation_id": NSNull(),
-              "content": "The speaker has just finished speaking. Translate now everything they said that you have not translated yet. Speak only the translation. If there is nothing to translate, stay silent."])
+              "content": "The speaker has finished their turn. Translate their last utterance now, even if it is short or sounds unfinished. Speak only the translation of what they actually said."])
     }
 
     func setMuted(_ muted: Bool) {
@@ -267,7 +270,7 @@ final class LiveSession: NSObject {
             log.error("server error: \(msg, privacy: .public)")
             onEvent?(.failed(msg))
         default:
-            break
+            if seenTypes.insert(type).inserted { onUnhandledEvent?(type) }
         }
     }
 }

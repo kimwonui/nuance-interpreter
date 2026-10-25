@@ -137,6 +137,9 @@ final class InterpreterController: ObservableObject {
     private var liveOneWay = false      // the running session's direction (fixed at Start)
     private var liveNuaPlaying = false  // pause gate: NUA's turn is playing (real playback state, not the level)
     private var liveFinishAt: Double = 0 // last "I'm done" orb tap (one per turn; repeated taps are ignored)
+    private var liveNudgeAt: Double = 0  // when the last "interpret now" request was sent (diagnostics: did a reply follow?)
+    /// A "done" tap was accepted and NUA hasn't started speaking yet (mic to the model is paused meanwhile).
+    @Published private(set) var liveFinishPending = false
     private var liveLastOutLoud: Double = 0 // no gate: last time the output level was audible
     private var liveSessionTurnID: UUID?
     private var liveLastOut: Double = 0
@@ -218,6 +221,7 @@ final class InterpreterController: ObservableObject {
 
     /// Stops listening completely: sessions closed, mic engine stopped (iOS mic indicator goes off).
     func stopConversation() {
+        liveFinishPending = false
         if let live {
             live.stop()
             self.live = nil
@@ -283,6 +287,8 @@ final class InterpreterController: ObservableObject {
             liveOneWay = isOneWay
             liveNuaPlaying = false
             liveFinishAt = 0
+            liveNudgeAt = 0
+            liveFinishPending = false
             liveLastOutLoud = 0
             // Two-way: ding when NUA finishes a translation so the other person knows to answer.
             LiveSession.gatedDevice.setTurnEndChime(!liveOneWay)
@@ -292,7 +298,15 @@ final class InterpreterController: ObservableObject {
             s.onEvent = { [weak self, weak s] e in guard let self, let s, self.live === s else { return }; self.liveEvent(e) }
             s.onLevels = { [weak self, weak s] i, o in guard let self, let s, self.live === s else { return }; self.liveLevels(i, o) }
             s.onHoldChange = { [weak self, weak s] h in guard let self, let s, self.live === s else { return }; self.liveHolding = h }
-            s.onPlayingChange = { [weak self, weak s] p in guard let self, let s, self.live === s else { return }; self.liveNuaPlaying = p }
+            s.onPlayingChange = { [weak self, weak s] p in
+                guard let self, let s, self.live === s else { return }
+                self.liveNuaPlaying = p
+                if p { self.liveFinishPending = false }
+            }
+            s.onUnhandledEvent = { [weak self, weak s] type in
+                guard let self, let s, self.live === s else { return }
+                self.tokens.report(["mode": "live:evt", "route": String(type.prefix(40))]) // event type only, no content
+            }
             s.onUserVoice = { [weak self, weak s] in
                 guard let self, let s, self.live === s else { return }
                 self.liveUserVoiceAt = CFAbsoluteTimeGetCurrent()
@@ -352,6 +366,7 @@ final class InterpreterController: ObservableObject {
             if let id = liveSessionTurnID { update(id) { $0.sourceText += d } }
             if let lang = Lang.detect(liveInput, among: (leftLang, rightLang)) { speakerSide = side(of: lang); turnSide = speakerSide }
         case .outputText(let d):
+            if liveNudgeAt > 0 { tokens.report(["mode": "live:nudge-ok", "endToFirstSound": now - liveNudgeAt]); liveNudgeAt = 0 }
             let newTurn = liveSessionTurnID == nil || now - liveLastOut > 1.5
             // With the pause gate on, a new turn needs speech detected after the previous turn;
             // otherwise this is unprompted model output (its audio is discarded by the gate too).
@@ -905,20 +920,49 @@ final class InterpreterController: ObservableObject {
         guard canFinishTurn, let live else { return }
         let now = CFAbsoluteTimeGetCurrent()
         guard now - liveFinishAt > 3 else { return } // one request per turn; ignore quick repeated taps
+        // The model's own transcript of what it heard since the last translation (length only, for diagnostics).
+        let heardChars = liveInput.trimmingCharacters(in: .whitespacesAndNewlines).count
         guard waitForPause else {
             // No gate: nothing is held on the phone; only the model can be asked.
-            liveFinishAt = now; live.nudgeInterpretNow(); tokens.report(["mode": "live:tap-nudge"]); return
+            liveFinishAt = now; sendNudge(live, heardChars: heardChars); return
         }
-        switch LiveSession.gatedDevice.finishTurn() {
+        let info = LiveSession.gatedDevice.finishTurn(heardByModel: heardChars > 0)
+        let diag = String(format: "in %d q %.1f held %.1f", heardChars, info.quietFor, info.heldSec)
+        switch info.result {
         case .nothingHeard:
-            tokens.report(["mode": "live:tap-nothing"]) // no speech detected: nothing to interpret
+            tokens.report(["mode": "live:tap-nothing", "route": diag]) // no speech detected or transcribed yet
         case .releasedHeld:
             liveFinishAt = now
-            tokens.report(["mode": "live:tap-release"]) // translation was ready: plays now
+            markFinishPending()
+            tokens.report(["mode": "live:tap-release", "route": diag]) // translation was ready: plays now
         case .waitingForModel:
             liveFinishAt = now
-            live.nudgeInterpretNow() // nothing generated yet: ask the model to interpret now
-            tokens.report(["mode": "live:tap-nudge"])
+            markFinishPending()
+            liveUserVoiceAt = now // speech confirmed: let the reply's text show as a new turn
+            tokens.report(["mode": "live:tap-nudge", "route": diag])
+            sendNudge(live, heardChars: heardChars) // nothing generated yet: ask the model to interpret now
+        }
+    }
+
+    /// Shows "finishing your turn" until NUA starts speaking (or 4 s, when the mic to the model reopens).
+    private func markFinishPending() {
+        liveFinishPending = true
+        let at = liveFinishAt
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+            guard let self, self.liveFinishAt == at else { return }
+            self.liveFinishPending = false
+        }
+    }
+
+    /// Sends the "interpret now" request and records whether any reply text follows within 6 s.
+    private func sendNudge(_ live: LiveSession, heardChars: Int) {
+        live.nudgeInterpretNow()
+        let at = CFAbsoluteTimeGetCurrent()
+        liveNudgeAt = at
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+            guard let self, self.liveNudgeAt == at else { return }
+            self.liveNudgeAt = 0
+            self.tokens.report(["mode": "live:nudge-none", "route": "in \(heardChars)"]) // the model didn't reply
         }
     }
 

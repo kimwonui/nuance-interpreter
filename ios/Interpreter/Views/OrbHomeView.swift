@@ -128,7 +128,7 @@ struct OrbHomeView: View {
             switch controller.autoState {
             case .connecting, .interpreting: return .processing
             // Mic is live: follow the real mic level; if NUA's voice is buffered for the pause, show waiting.
-            case .waiting, .hearing: return controller.liveHolding ? .holding : .listening
+            case .waiting, .hearing: return controller.liveFinishPending ? .processing : controller.liveHolding ? .holding : .listening
             case .speaking: return .speaking(controller.speakingLanguage)
             case .muted: return .disabled
             case .off: return .idle
@@ -154,6 +154,7 @@ struct OrbHomeView: View {
                 return ("Tap to start", "Mic off · Tap the orb to start")
             case .connecting: return ("Connecting…", "Getting the interpreter ready")
             case .waiting, .hearing:
+                if controller.liveFinishPending { return ("Finishing your turn", "Mic paused · Interpreting what you said") }
                 if controller.liveHolding { return ("Waiting for you to finish", "Tap the orb when you're done") }
                 return ("Listening", controller.isOneWay ? "Speak \(controller.leftLang.name) · Tap the orb when done" : "Speak either language · Tap the orb when done")
             case .interpreting: return ("Interpreting", "Getting the translation ready")
