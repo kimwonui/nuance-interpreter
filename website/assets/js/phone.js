@@ -502,6 +502,8 @@
       this.renderList();
       this.dom.scrim.hidden = false;
       this.dom.sheet.hidden = false;
+      // Each presentation starts at the top, like a freshly presented SwiftUI sheet.
+      this.dom.list.scrollTop = 0;
       requestAnimationFrame(() => { this.app.classList.add("sheet-open"); });
       setTimeout(() => this.dom.search.focus({ preventScroll: true }), 60);
       this.emit("picker", { open: true, side });

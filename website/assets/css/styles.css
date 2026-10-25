@@ -141,11 +141,15 @@ h3 { margin: 0; font-size: 18px; letter-spacing: -0.01em; line-height: 1.3; }
   width: 412px; height: 866px; margin: -433px 0 0 -206px;
   transform: scale(var(--scale, 0.7));
   transform-style: preserve-3d;
+  /* The empty wrapper is a flat plane at z = 0 in the same 3D context. When the phone tilts, part of the
+     screen sinks behind it and clicks there would land on the wrapper, so only the phone itself takes hits. */
+  pointer-events: none;
 }
 .device-body {
   position: absolute; inset: 0; transform-style: preserve-3d;
   transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) rotateZ(var(--rz, 0deg));
   will-change: transform;
+  pointer-events: auto;
 }
 .slab {
   position: absolute; inset: 0; border-radius: 66px;
