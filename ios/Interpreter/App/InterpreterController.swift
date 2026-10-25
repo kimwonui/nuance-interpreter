@@ -471,7 +471,8 @@ final class InterpreterController: ObservableObject {
         } else {
             playingTurnID = nil
             if let id = liveSessionTurnID, now - liveLastOut > 1.5 { update(id) { if $0.status == .playing { $0.status = .done } } }
-            autoState = input > 0.03 ? .hearing : .waiting
+            // Hearing = voice within the last 0.8 s, so gaps between words don't flip the halves' "talking" cue.
+            autoState = now - liveLastLoudIn < 0.8 ? .hearing : .waiting
         }
     }
 

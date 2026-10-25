@@ -16,7 +16,7 @@ struct SideHalf: View {
 
     var body: some View {
         ZStack {
-            FlagBackground(lang: lang, cue: cue, level: cue == .talking ? controller.level : (cue == .listen ? controller.outputLevel : 0), flowFromTop: true)
+            FlagBackground(lang: lang, cue: cue, flowFromTop: true)
                 .clipShape(RoundedRectangle(cornerRadius: Radius.xl))
             VStack(spacing: 6) {
                 languageChip
@@ -83,44 +83,55 @@ struct SideHalf: View {
     }
 }
 
-/// Soft flag background for a half. Breathes when it's that side's turn or they are talking (follows the
-/// mic level when talking); a light band flows toward the listener while NUA plays the translation.
+/// Soft flag background for a half. Steady opacity per state, changing smoothly only when the state changes:
+/// talking = clearly visible and still (no pulsing with the mic), listening = the flag waves and a light band
+/// flows toward the listener while NUA plays the translation, your turn = gentle breathing.
 struct FlagBackground: View {
     let lang: Lang
     let cue: SideHalf.Cue
-    let level: Float
     /// true for the bottom half: the flow comes from the top edge (the orb side).
     let flowFromTop: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        TimelineView(.animation(paused: reduceMotion || cue == .idle || cue == .muted || cue == .waitOther)) { tl in
-            Canvas { gc, size in
-                let t = tl.date.timeIntervalSinceReferenceDate
-                let rect = CGRect(origin: .zero, size: size)
-                gc.fill(Path(rect), with: .color(Theme.surface))
-                var layer = gc
-                layer.opacity = flagOpacity(t)
-                FlagPainter.paint(lang.flag, in: &layer, rect: rect, phase: reduceMotion ? 0 : t * 1.2, angle: reduceMotion ? 0 : t * 0.4, wave: cue == .listen || cue == .talking ? 3 : 0)
-                if cue == .listen && !reduceMotion {
-                    // Light flowing from the orb toward this person: "this is for you to hear".
-                    let p = (t.truncatingRemainder(dividingBy: 1.4)) / 1.4
-                    let y = flowFromTop ? size.height * p : size.height * (1 - p)
-                    let band = CGRect(x: 0, y: y - size.height * 0.18, width: size.width, height: size.height * 0.36)
-                    gc.fill(Path(band), with: .linearGradient(
-                        Gradient(colors: [.white.opacity(0), .white.opacity(0.55), .white.opacity(0)]),
-                        startPoint: CGPoint(x: 0, y: band.minY), endPoint: CGPoint(x: 0, y: band.maxY)))
+        ZStack {
+            Theme.surface
+            TimelineView(.animation(paused: reduceMotion || !(cue == .yourTurn || cue == .listen))) { tl in
+                Canvas { gc, size in
+                    let t = tl.date.timeIntervalSinceReferenceDate
+                    var layer = gc
+                    if cue == .yourTurn && !reduceMotion { layer.opacity = 0.75 + 0.25 * sin(2 * .pi * t / 3.0) } // gentle breathing
+                    let moving = cue == .listen && !reduceMotion
+                    FlagPainter.paint(lang.flag, in: &layer, rect: CGRect(origin: .zero, size: size),
+                                      phase: moving ? t * 1.2 : 0, angle: moving ? t * 0.4 : 0, wave: moving ? 3 : 0)
                 }
+            }
+            .opacity(baseOpacity)
+            .animation(.easeInOut(duration: 0.35), value: cue)
+            if cue == .listen && !reduceMotion {
+                TimelineView(.animation) { tl in
+                    Canvas { gc, size in
+                        // Light flowing from the orb toward this person: "this is for you to hear".
+                        let t = tl.date.timeIntervalSinceReferenceDate
+                        let p = (t.truncatingRemainder(dividingBy: 1.4)) / 1.4
+                        let y = flowFromTop ? size.height * p : size.height * (1 - p)
+                        let band = CGRect(x: 0, y: y - size.height * 0.18, width: size.width, height: size.height * 0.36)
+                        gc.fill(Path(band), with: .linearGradient(
+                            Gradient(colors: [.white.opacity(0), .white.opacity(0.55), .white.opacity(0)]),
+                            startPoint: CGPoint(x: 0, y: band.minY), endPoint: CGPoint(x: 0, y: band.maxY)))
+                    }
+                }
+                .transition(.opacity)
             }
         }
     }
 
-    private func flagOpacity(_ t: Double) -> Double {
+    private var baseOpacity: Double {
         switch cue {
         case .idle, .muted: return 0.06
         case .waitOther: return 0.04
-        case .yourTurn: return reduceMotion ? 0.16 : 0.12 + 0.06 * sin(2 * .pi * t / 3.0)       // gentle breathing
-        case .talking: return min(0.32, 0.16 + Double(level) * 1.5)                                // follows the mic
+        case .yourTurn: return 0.18
+        case .talking: return 0.34 // clearly visible, steady
         case .listen: return 0.22
         }
     }
