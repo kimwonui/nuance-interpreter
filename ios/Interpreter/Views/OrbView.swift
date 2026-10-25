@@ -246,12 +246,12 @@ final class OrbDriver {
             if mode == .processing { rotation += dt * 2 * .pi / 2.4; sweepAngle += dt * 2 * .pi / 1.4 }
             if mode == .holding { holdAngle += dt * 2 * .pi / 3.0 }
             // Cloud drift: calm when stopped, livelier while listening/speaking, quickest while connecting.
-            // A steady pace per state — it never follows the mic.
+            // A steady pace per state — it never follows the mic. (×1.4 of the first cloud version, owner's ask.)
             let flowSpeed: Double = switch mode {
-            case .idle: 0.55
-            case .listening, .speaking: 0.9
-            case .processing: 1.4
-            case .holding: 0.5
+            case .idle: 0.77
+            case .listening, .speaking: 1.26
+            case .processing: 1.96
+            case .holding: 0.7
             case .disabled: 0
             }
             flowPhase += dt * flowSpeed
