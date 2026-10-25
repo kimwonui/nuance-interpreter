@@ -61,6 +61,12 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     /// (owner rule: never produce what nobody said). Continuations within 2 s of its last turn are allowed.
     private var voiceSinceTurn = false
     private var heldSince: Double = 0
+    /// Last 0.4 s of the REAL mic (before muting), kept on the mic thread. On a cut-in it is sent to the
+    /// model first, so the start of the interruption (muted while NUA played) is not lost.
+    private var micHistory = [Int16](repeating: 0, count: Int(GatedAudioDevice.rate * 0.4))
+    private var historyWrite = 0
+    private var historyFill = 0
+    private var flushPreRoll = false
 
     // Render-thread scratch (preallocated).
     private var pull = [Int16](repeating: 0, count: 8_192)
@@ -223,15 +229,34 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         detectSpeech(rms: rms, frames: n)
         os_unfair_lock_lock(&lock)
         let suppress = CFAbsoluteTimeGetCurrent() < suppressUntil
+        let flush = flushPreRoll
+        flushPreRoll = false
         os_unfair_lock_unlock(&lock)
-        if suppress { memset(ch[0], 0, n * 2) } // the model hears silence while NUA talks
 
+        if flush, historyFill > 0 {
+            // Cut-in: give the model the interruption's opening that was muted while NUA played.
+            var pre = [Int16](repeating: 0, count: historyFill)
+            let start = (historyWrite - historyFill + micHistory.count) % micHistory.count
+            for i in 0..<historyFill { pre[i] = micHistory[(start + i) % micHistory.count] }
+            pre.withUnsafeMutableBufferPointer { deliver(adm, $0.baseAddress!, historyFill) }
+            historyFill = 0
+        }
+        for i in 0..<n {
+            micHistory[historyWrite] = ch[0][i]
+            historyWrite = (historyWrite + 1) % micHistory.count
+        }
+        historyFill = min(micHistory.count, historyFill + n)
+        if suppress { memset(ch[0], 0, n * 2) } // the model hears silence while NUA is audible
+        deliver(adm, ch[0], n)
+    }
+
+    private func deliver(_ adm: RTCAudioDeviceDelegate, _ samples: UnsafeMutablePointer<Int16>, _ n: Int) {
         var flags = AudioUnitRenderActionFlags()
         var ts = AudioTimeStamp()
         ts.mSampleTime = recTime
         ts.mFlags = .sampleTimeValid
         recTime += Double(n)
-        var abl = AudioBufferList(mNumberBuffers: 1, mBuffers: AudioBuffer(mNumberChannels: 1, mDataByteSize: UInt32(n * 2), mData: UnsafeMutableRawPointer(ch[0])))
+        var abl = AudioBufferList(mNumberBuffers: 1, mBuffers: AudioBuffer(mNumberChannels: 1, mDataByteSize: UInt32(n * 2), mData: UnsafeMutableRawPointer(samples)))
         _ = adm.deliverRecordedData(&flags, &ts, 1, UInt32(n), &abl, nil, nil)
     }
 
@@ -260,6 +285,7 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
             if !voiceSinceTurn { voiceSinceTurn = true; newVoice = true }
             if playing {
                 cutIn = (rms, outLevel)
+                flushPreRoll = true
                 // Cut-in: stop NUA, drop what was queued, and let the mic through right away.
                 ring.clear()
                 releasing = false
