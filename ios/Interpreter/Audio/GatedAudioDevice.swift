@@ -133,6 +133,22 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         suppressUntil = max(suppressUntil, until)
     }
 
+    /// The speaker tapped "I'm done" (orb). Releases held audio at once and lets the next audio of this turn play
+    /// without waiting for the pause. Expires if they start talking again or after 6 s.
+    private var userDoneAt: Double = 0
+    enum FinishResult { case releasedHeld, waitingForModel, nothingHeard }
+
+    func finishTurn() -> FinishResult {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        let now = CFAbsoluteTimeGetCurrent()
+        let continuation = lastReleaseEnd > 0 && now - lastReleaseEnd < 2.0
+        // Never release what nobody said (same rule as the gate).
+        guard voiceSinceTurn || continuation || pausedAt > 0 else { return .nothingHeard }
+        userDoneAt = now
+        return ring.isEmpty && pausedAt == 0 ? .waitingForModel : .releasedHeld
+    }
+
     /// Wrong-direction output was cut: ignore NUA's audio until the next detected speech.
     private var discarding = false
     private var turnPlayed = 0
@@ -184,6 +200,7 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         outLevel = 0
         voiceSinceTurn = false
         heldSince = 0
+        userDoneAt = 0
         chime = []
         chimePos = 0
         chimeUntil = 0
@@ -436,6 +453,7 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
                 flushPreRoll = true
                 // Confirmed cut-in: stop NUA, drop what was queued, and let the mic through right away.
                 ring.clear()
+                userDoneAt = 0
                 releasing = false
                 pausedAt = 0
                 earlyAudio = false
@@ -504,10 +522,13 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         let continuation = lastReleaseEnd > 0 && now - lastReleaseEnd < 2.0
         let hold = earlyAudio ? earlyHoldSeconds : holdSeconds
         var dropped: Double?
+        // "Done" tap still valid: not expired and they haven't started talking again since.
+        let userDone = userDoneAt > 0 && now - userDoneAt < 6 && lastVoice < userDoneAt + 0.3
         if pausedAt > 0 {
             // Paused by a voice that never became a cut-in (a short sound or echo): resume after a short quiet.
-            if quietFor >= 0.3 { pausedAt = 0; releasing = true; voiceRun = 0 }
-        } else if !releasing, !ring.isEmpty, quietFor >= hold, voiceSinceTurn || continuation {
+            if quietFor >= 0.3 || userDone { pausedAt = 0; releasing = true; voiceRun = 0; userDoneAt = 0 }
+        } else if !releasing, !ring.isEmpty, quietFor >= hold || userDone, voiceSinceTurn || continuation {
+            userDoneAt = 0
             releasing = true
             voiceRun = 0 // the speaker's leftover count must not read as talking over NUA's first syllable
             let wasEarly = earlyAudio

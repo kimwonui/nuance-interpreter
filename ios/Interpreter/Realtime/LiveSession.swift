@@ -120,6 +120,15 @@ final class LiveSession: NSObject {
         }
     }
 
+    private var nudgeCount = 0
+    /// The speaker said they're done (orb tap) and no translation has started: ask the model, through the
+    /// documented trusted-instruction event, to interpret now. Model behaviour — it may still wait or answer late.
+    func nudgeInterpretNow() {
+        nudgeCount += 1
+        send(["type": "session.instructions.append", "event_id": "nua_finish_\(nudgeCount)", "delegation_id": NSNull(),
+              "content": "The speaker has just finished speaking. Translate now everything they said that you have not translated yet. Speak only the translation. If there is nothing to translate, stay silent."])
+    }
+
     func setMuted(_ muted: Bool) {
         micTrack?.isEnabled = !muted
         send(["type": muted ? "session.input_audio.mute" : "session.input_audio.unmute"])

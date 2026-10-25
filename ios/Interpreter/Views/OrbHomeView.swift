@@ -31,14 +31,17 @@ struct OrbHomeView: View {
                 .rotationEffect(.degrees(180))
             VStack(spacing: 2) {
                 OrbView(mode: orbMode, inputLevel: controller.level, outputLevel: controller.outputLevel,
-                        accessibilityText: controller.canStart ? "Start conversation" : "\(status.title). \(status.sub)", diameter: 190)
+                        accessibilityText: controller.canStart ? "Start conversation"
+                            : controller.canFinishTurn ? "\(status.title). Done speaking" : "\(status.title). \(status.sub)", diameter: 190)
                     .frame(height: 170)
                     .contentShape(Circle())
-                    // Stopped: one tap starts, exactly like Start conversation. Otherwise only the existing
-                    // "tap to stop NUA's voice"; a tap never stops or mutes the conversation.
+                    // Stopped: starts (like Start conversation). Listening: "I'm done — interpret now". NUA speaking:
+                    // stops NUA's voice. A tap never stops or mutes the conversation itself.
                     .onTapGesture { orbTapped() }
-                    .accessibilityAddTraits(controller.canStart ? .isButton : [])
-                    .accessibilityHint(controller.canStart ? "Turns on the microphone and starts listening for \(controller.leftLang.name) or \(controller.rightLang.name)" : "")
+                    .accessibilityAddTraits(controller.canStart || controller.canFinishTurn || controller.autoState == .speaking ? .isButton : [])
+                    .accessibilityHint(controller.canStart ? "Turns on the microphone and starts listening for \(controller.leftLang.name) or \(controller.rightLang.name)"
+                                       : controller.canFinishTurn ? "Tells NUA you finished speaking so it interprets now"
+                                       : controller.autoState == .speaking ? "Stops NUA's voice" : "")
                     .accessibilityAction { orbTapped() }
                 Text(status.title).font(.noto(16, .bold)).foregroundStyle(Theme.text)
                 directionLine
@@ -115,6 +118,7 @@ struct OrbHomeView: View {
 
     private func orbTapped() {
         if controller.canStart { controller.startConversation(); return }
+        if controller.canFinishTurn { controller.finishTurnNow(); return }
         if controller.phase == .playing || controller.autoState == .speaking { controller.stopPlayback() }
     }
 
@@ -150,8 +154,8 @@ struct OrbHomeView: View {
                 return ("Tap to start", "Mic off · Tap the orb to start")
             case .connecting: return ("Connecting…", "Getting the interpreter ready")
             case .waiting, .hearing:
-                if controller.liveHolding { return ("Waiting for you to finish", "NUA speaks after a short pause") }
-                return ("Listening", "Speak either language")
+                if controller.liveHolding { return ("Waiting for you to finish", "Tap the orb when you're done") }
+                return ("Listening", controller.isOneWay ? "Speak \(controller.leftLang.name) · Tap the orb when done" : "Speak either language · Tap the orb when done")
             case .interpreting: return ("Interpreting", "Getting the translation ready")
             case .speaking:
                 let lang = controller.speakingLanguage.map { " \($0.name)" } ?? ""

@@ -136,6 +136,7 @@ final class InterpreterController: ObservableObject {
     private var liveInput = ""          // source transcript since the last interpretation
     private var liveOneWay = false      // the running session's direction (fixed at Start)
     private var liveNuaPlaying = false  // pause gate: NUA's turn is playing (real playback state, not the level)
+    private var liveFinishAt: Double = 0 // last "I'm done" orb tap (one per turn; repeated taps are ignored)
     private var liveLastOutLoud: Double = 0 // no gate: last time the output level was audible
     private var liveSessionTurnID: UUID?
     private var liveLastOut: Double = 0
@@ -281,6 +282,7 @@ final class InterpreterController: ObservableObject {
             liveStarted = false
             liveOneWay = isOneWay
             liveNuaPlaying = false
+            liveFinishAt = 0
             liveLastOutLoud = 0
             // Two-way: ding when NUA finishes a translation so the other person knows to answer.
             LiveSession.gatedDevice.setTurnEndChime(!liveOneWay)
@@ -886,7 +888,38 @@ final class InterpreterController: ObservableObject {
 
     func stopPlayback() {
         if phase == .playing { interruptPlayback() }
-        if autoState == .speaking { audio.stopPlayback(); autoEngine.playbackDrained() }
+        guard autoState == .speaking else { return }
+        if live != nil {
+            // GPT-Live (pause gate): stop NUA now and drop the rest of this answer. (Before, this called the other
+            // engine's player and didn't stop GPT-Live at all.)
+            if waitForPause { LiveSession.gatedDevice.discardUntilVoice(); tokens.report(["mode": "live:tap-stop"]) }
+            return
+        }
+        audio.stopPlayback(); autoEngine.playbackDrained()
+    }
+
+    /// Orb tap while listening: "I'm done — interpret now." Keeps the session and everything already heard.
+    var canFinishTurn: Bool { live != nil && liveStarted && (autoState == .waiting || autoState == .hearing) }
+
+    func finishTurnNow() {
+        guard canFinishTurn, let live else { return }
+        let now = CFAbsoluteTimeGetCurrent()
+        guard now - liveFinishAt > 3 else { return } // one request per turn; ignore quick repeated taps
+        guard waitForPause else {
+            // No gate: nothing is held on the phone; only the model can be asked.
+            liveFinishAt = now; live.nudgeInterpretNow(); tokens.report(["mode": "live:tap-nudge"]); return
+        }
+        switch LiveSession.gatedDevice.finishTurn() {
+        case .nothingHeard:
+            tokens.report(["mode": "live:tap-nothing"]) // no speech detected: nothing to interpret
+        case .releasedHeld:
+            liveFinishAt = now
+            tokens.report(["mode": "live:tap-release"]) // translation was ready: plays now
+        case .waitingForModel:
+            liveFinishAt = now
+            live.nudgeInterpretNow() // nothing generated yet: ask the model to interpret now
+            tokens.report(["mode": "live:tap-nudge"])
+        }
     }
 
     func retry(_ id: UUID) {
