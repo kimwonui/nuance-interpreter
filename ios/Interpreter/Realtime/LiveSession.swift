@@ -21,11 +21,13 @@ final class LiveSession: NSObject {
     /// Mic level and NUA's playback level (0…1, from WebRTC stats every 0.1 s).
     var onLevels: ((Float, Float) -> Void)?
     /// Hold-until-pause mode: seconds from the user's last speech to NUA's first released audio.
-    var onRelease: ((Double) -> Void)?
+    var onRelease: ((Double, Bool) -> Void)?
     var onHoldChange: ((Bool) -> Void)?
     var onCutIn: ((Float, Float) -> Void)?
     var onUserVoice: (() -> Void)?
     var onDroppedUnprompted: ((Double) -> Void)?
+    var onSoftPause: (() -> Void)?
+    var onTurnPlayed: ((Double, Double) -> Void)?
 
     /// Standard WebRTC audio (plays NUA as soon as it arrives).
     private static let standardFactory: RTCPeerConnectionFactory = {
@@ -63,11 +65,13 @@ final class LiveSession: NSObject {
             device.reset()
             Self.gatedOwner = ObjectIdentifier(self)
             device.onLevels = { [weak self] i, o in Task { @MainActor in self?.onLevels?(i, o) } }
-            device.onRelease = { [weak self] dt in Task { @MainActor in self?.onRelease?(dt) } }
+            device.onRelease = { [weak self] dt, early in Task { @MainActor in self?.onRelease?(dt, early) } }
             device.onHoldChange = { [weak self] h in Task { @MainActor in self?.onHoldChange?(h) } }
             device.onCutIn = { [weak self] m, o in Task { @MainActor in self?.onCutIn?(m, o) } }
             device.onUserVoice = { [weak self] in Task { @MainActor in self?.onUserVoice?() } }
             device.onDroppedUnprompted = { [weak self] sec in Task { @MainActor in self?.onDroppedUnprompted?(sec) } }
+            device.onSoftPause = { [weak self] in Task { @MainActor in self?.onSoftPause?() } }
+            device.onTurnPlayed = { [weak self] p, k in Task { @MainActor in self?.onTurnPlayed?(p, k) } }
         } else {
             configureAudioSession()
         }
@@ -147,6 +151,8 @@ final class LiveSession: NSObject {
                 Self.gatedDevice.onCutIn = nil
                 Self.gatedDevice.onUserVoice = nil
                 Self.gatedDevice.onDroppedUnprompted = nil
+                Self.gatedDevice.onSoftPause = nil
+                Self.gatedDevice.onTurnPlayed = nil
                 Self.gatedOwner = nil
             }
             return

@@ -80,9 +80,9 @@ final class InterpreterController: ObservableObject {
         }
     }
     @Published private(set) var engineNote: String?
-    /// NUA's translated voice is buffered, waiting for the speaker's 0.5 s pause (from the audio gate).
+    /// NUA's translated voice is buffered, waiting for the speaker to finish (from the audio gate).
     @Published private(set) var liveHolding = false
-    /// GPT-Live: hold NUA's voice until the speaker has paused for 0.5 s (app-enforced; see GatedAudioDevice).
+    /// GPT-Live: hold NUA's voice until the speaker has finished (app-enforced; see GatedAudioDevice).
     @Published var waitForPause: Bool = UserDefaults.standard.object(forKey: "liveWaitForPause") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(waitForPause, forKey: "liveWaitForPause")
@@ -270,13 +270,24 @@ final class InterpreterController: ObservableObject {
                 guard let self, let s, self.live === s else { return }
                 self.tokens.report(["mode": "live:cutin", "route": String(format: "mic %.3f out %.3f", mic, out)])
             }
-            s.onRelease = { [weak self, weak s] dt in
+            s.onSoftPause = { [weak self, weak s] in
+                guard let self, let s, self.live === s else { return }
+                self.tokens.report(["mode": "live:pause"])
+            }
+            s.onTurnPlayed = { [weak self, weak s] played, skipped in
+                guard let self, let s, self.live === s else { return }
+                // NUA's turn length as played and any over-long silence skipped (pauses ≤ 1 s are kept).
+                self.tokens.report(["mode": "live:turn", "speechSec": played, "trimmedTailSec": skipped])
+            }
+            s.onRelease = { [weak self, weak s] dt, early in
                 guard let self, let s, self.live === s else { return }
                 let dir = self.turns.last.map { "\($0.source.code)→\($0.target.code)" } ?? "?"
                 if let id = self.liveSessionTurnID { self.update(id) { $0.metrics.tPlaybackStart = CFAbsoluteTimeGetCurrent() } }
                 self.latency.append(LatencySample(direction: dir, speechSec: 0, endToFirstSound: dt, endToClosed: nil))
-                // Exact: last detected user speech → first released NUA audio (≥ 0.5 s by design).
-                self.tokens.report(["mode": "live:gated", "direction": dir, "endToFirstSound": dt, "route": LiveSession.gatedDevice.diagnostics])
+                // Exact: last detected user speech → first released NUA audio. "early" = NUA's audio began while the
+                // speaker was still talking, so the gate waited the longer hold.
+                self.tokens.report(["mode": "live:gated", "direction": dir, "endToFirstSound": dt,
+                                    "route": LiveSession.gatedDevice.diagnostics + (early ? " early" : "")])
             }
             s.start { [weak self] offer in
                 guard let self else { throw CancellationError() }

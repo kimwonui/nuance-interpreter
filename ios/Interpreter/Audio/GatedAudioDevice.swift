@@ -9,9 +9,13 @@ import os
 /// - Mic: AVAudioEngine input with Apple voice processing (echo cancellation) → 48 kHz mono PCM16 → WebRTC.
 ///   A local speech detector (adaptive noise floor) records when the user last spoke.
 /// - Speaker: NUA's audio is pulled from WebRTC continuously into a buffer and is released only once the mic
-///   has been quiet for `holdSeconds` since the last speech. If the user resumes before that, it stays on
-///   hold and the count restarts from the new last speech. Speaking clearly over NUA while it plays stops it
-///   and clears the buffer (cut-in); the model itself also stops when interrupted.
+///   has been quiet long enough since the last speech: `holdSeconds` when NUA started after the speaker had
+///   already stopped (the model judged the sentence finished), `earlyHoldSeconds` when NUA's audio began while
+///   the speaker was still talking or they kept talking over the held audio (likely a breath mid-sentence).
+///   If the user resumes before that, it stays on hold and the count restarts from the new last speech.
+/// - While NUA plays, the first ~0.12 s of the user's voice pauses it (buffer kept); ~0.35 s confirms a cut-in
+///   (buffer cleared, the muted start of the interruption handed to the model). A false alarm resumes.
+/// - NUA's own pauses are kept as generated (up to `maxGap` each): no silence skipping, no rate change.
 /// This is a hold-until-pause gate, not a fixed delay: audio produced early waits for the pause.
 final class GatedAudioDevice: NSObject, RTCAudioDevice {
     static let rate: Double = 48_000
@@ -19,10 +23,15 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     /// Owner's latest priority is near-instant output: a short guard so NUA doesn't start while the speaker is
     /// mid-word, not a full pause rule (was 0.5 s).
     var holdSeconds: Double = 0.2
+    /// Hold for audio the model produced while the speaker was still talking: long enough to ride over a
+    /// breath or hesitation inside a sentence, short enough to feel prompt after the sentence really ends.
+    var earlyHoldSeconds: Double = 0.6
+    /// NUA's silences up to this length are played as generated (its rhythm and meaningful pauses).
+    private static let maxGap = 1.0
     /// Mic level and the level of audio actually played (called at ~10 Hz on audio threads).
     var onLevels: ((Float, Float) -> Void)?
     /// Seconds from the user's last speech to the first released NUA audio of a turn.
-    var onRelease: ((Double) -> Void)?
+    var onRelease: ((Double, Bool) -> Void)?
     /// true while NUA's voice is buffered and waiting for the user's pause (real gate state, not a timer).
     var onHoldChange: ((Bool) -> Void)?
     /// A cut-in stopped NUA: mic level and NUA's playing level at that moment (diagnostics).
@@ -31,6 +40,10 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     var onUserVoice: (() -> Void)?
     /// NUA audio that arrived with no detected speech before it was discarded (seconds of audio).
     var onDroppedUnprompted: ((Double) -> Void)?
+    /// The user's voice paused NUA mid-playback (before a cut-in was confirmed).
+    var onSoftPause: (() -> Void)?
+    /// A NUA turn finished playing: seconds of audio played (with its pauses), seconds of over-long silence skipped.
+    var onTurnPlayed: ((Double, Double) -> Void)?
     private var holdingReported = false
 
     private weak var adm: RTCAudioDeviceDelegate?
@@ -48,7 +61,7 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     private var releasing = false
     private var noiseFloor: Float = 0.004
     private var voiceRun = 0
-    private var silentQueued = 0 // consecutive silent samples queued while holding
+    private var silentQueued = 0 // consecutive silent samples queued (NUA's current pause)
     /// Half-duplex echo guard: while NUA's voice plays (and 0.4 s after), the model receives silence instead
     /// of the mic, so it can never hear and re-translate its own voice. Local cut-in detection still runs.
     private var suppressUntil: Double = 0
@@ -63,11 +76,18 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     /// (owner rule: never produce what nobody said). Continuations within 2 s of its last turn are allowed.
     private var voiceSinceTurn = false
     private var heldSince: Double = 0
-    /// Last 0.4 s of the REAL mic (before muting), kept on the mic thread. On a cut-in it is sent to the
-    /// model first, so the start of the interruption (muted while NUA played) is not lost.
-    private var micHistory = [Int16](repeating: 0, count: Int(GatedAudioDevice.rate * 0.4))
+    /// The held audio began while the speaker was talking, or they kept talking over it → `earlyHoldSeconds`.
+    private var earlyAudio = false
+    /// NUA paused by the user's voice, waiting for a confirmed cut-in or a resume (0 = not paused).
+    private var pausedAt: Double = 0
+    private var turnPlayed = 0
+    private var turnSkipped = 0
+    /// Last 0.8 s of the REAL mic (before muting), kept on the mic thread. On a cut-in the muted part of the
+    /// interruption is sent to the model first, so its start is not lost (and nothing is sent twice).
+    private var micHistory = [Int16](repeating: 0, count: Int(GatedAudioDevice.rate * 0.8))
     private var historyWrite = 0
     private var historyFill = 0
+    private var mutedTail = 0 // most recent consecutive samples the model received as silence
     private var flushPreRoll = false
 
     // Render-thread scratch (preallocated).
@@ -106,6 +126,10 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         outLevel = 0
         voiceSinceTurn = false
         heldSince = 0
+        earlyAudio = false
+        pausedAt = 0
+        turnPlayed = 0
+        turnSkipped = 0
         os_unfair_lock_unlock(&lock)
         holdingReported = false
     }
@@ -230,25 +254,31 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         lastMic = rms
         detectSpeech(rms: rms, frames: n)
         os_unfair_lock_lock(&lock)
-        let suppress = CFAbsoluteTimeGetCurrent() < suppressUntil
+        // Paused by the user's voice: keep the model muted until it's a confirmed cut-in, so a false alarm
+        // (e.g. NUA's own echo) never reaches the model.
+        let suppress = CFAbsoluteTimeGetCurrent() < suppressUntil || pausedAt > 0
         let flush = flushPreRoll
         flushPreRoll = false
         os_unfair_lock_unlock(&lock)
 
-        if flush, historyFill > 0 {
-            // Cut-in: give the model the interruption's opening that was muted while NUA played.
-            var pre = [Int16](repeating: 0, count: historyFill)
-            let start = (historyWrite - historyFill + micHistory.count) % micHistory.count
-            for i in 0..<historyFill { pre[i] = micHistory[(start + i) % micHistory.count] }
-            pre.withUnsafeMutableBufferPointer { deliver(adm, $0.baseAddress!, historyFill) }
-            historyFill = 0
+        if flush {
+            // Cut-in: give the model the interruption's opening that it received as silence. Only the most recent
+            // muted run (in order, ≤ 0.5 s), so nothing is sent twice or out of order.
+            let k = min(mutedTail, historyFill, Int(Self.rate * 0.5))
+            if k > 0 {
+                var pre = [Int16](repeating: 0, count: k)
+                let start = (historyWrite - k + micHistory.count) % micHistory.count
+                for i in 0..<k { pre[i] = micHistory[(start + i) % micHistory.count] }
+                pre.withUnsafeMutableBufferPointer { deliver(adm, $0.baseAddress!, k) }
+            }
+            mutedTail = 0
         }
         for i in 0..<n {
             micHistory[historyWrite] = ch[0][i]
             historyWrite = (historyWrite + 1) % micHistory.count
         }
         historyFill = min(micHistory.count, historyFill + n)
-        if suppress { memset(ch[0], 0, n * 2) } // the model hears silence while NUA is audible
+        if suppress { memset(ch[0], 0, n * 2); mutedTail += n } else { mutedTail = 0 } // silence while NUA is audible
         deliver(adm, ch[0], n)
     }
 
@@ -266,41 +296,59 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         let now = CFAbsoluteTimeGetCurrent()
         os_unfair_lock_lock(&lock)
         let playing = releasing
-        // While NUA plays, a cut-in must be above a fixed floor, above the noise floor, AND clearly above the
+        let paused = pausedAt > 0
+        // While NUA plays, the voice must be above a fixed floor, above the noise floor, AND clearly above the
         // level NUA is playing at (its own echo follows that level; a person talking over it exceeds it).
-        // Not playing: a lower bar, only used to time the 0.5 s pause.
-        let threshold = playing ? max(0.06, noiseFloor * 6, outLevel * 0.6) : max(0.015, noiseFloor * 3)
-        // Sustained speech, not clicks or coughs: ~0.35 s while NUA plays, ~0.15 s otherwise. Brief dips are
-        // tolerated (leaky count) instead of resetting, so real speech isn't missed between syllables.
-        let needed = Int(Self.rate * (playing ? 0.35 : 0.15))
-        if rms > threshold {
+        // Paused: NUA is silent, so no echo — a moderate bar. Otherwise: a lower bar, used to time the pause.
+        let threshold = playing ? max(0.06, noiseFloor * 6, outLevel * 0.6)
+            : paused ? max(0.03, noiseFloor * 4) : max(0.015, noiseFloor * 3)
+        // Sustained speech, not clicks or coughs: ~0.35 s confirms a cut-in, ~0.12 s pauses NUA, ~0.15 s
+        // otherwise. Brief dips are tolerated (leaky count) instead of resetting, so syllable gaps don't reset it.
+        let needed = Int(Self.rate * (playing || paused ? 0.35 : 0.15))
+        let pauseNeeded = Int(Self.rate * 0.12)
+        let voiced = rms > threshold
+        if voiced {
             // Bounded: the count only needs to reach `needed`; unbounded growth kept "still talking" alive for
             // seconds after the speaker stopped (≈2 s per 1 s of speech) and delayed every translation.
             voiceRun = min(voiceRun + frames, needed * 2)
         } else {
             voiceRun = max(0, voiceRun - frames / 2)
             // Learn the room's noise only from clearly non-speech sound, so quiet speech is never learned as noise.
-            if !playing, rms < threshold * 0.5 { noiseFloor = min(0.02, noiseFloor * 0.995 + rms * 0.005) }
+            if !playing, !paused, rms < threshold * 0.5 { noiseFloor = min(0.02, noiseFloor * 0.995 + rms * 0.005) }
         }
         var cutIn: (Float, Float)?
         var newVoice = false
-        if voiceRun >= needed {
+        var softPause = false
+        if playing, voiced, voiceRun >= pauseNeeded, voiceRun < needed {
+            // The speaker (or the other person) started talking over NUA: pause it now, keep what's queued.
+            releasing = false
+            pausedAt = now
+            lastVoice = now
+            softPause = true
+        } else if voiceRun >= needed {
             // "Last speech" = an actually voiced moment, not the tail of the counter.
-            if rms > threshold { lastVoice = now }
+            if voiced { lastVoice = now }
             if !voiceSinceTurn { voiceSinceTurn = true; newVoice = true }
-            if playing {
+            // Still talking while NUA's audio waits → that audio was early (mid-sentence): wait longer for it.
+            if !playing, !paused, !ring.isEmpty { earlyAudio = true }
+            if playing || paused {
                 cutIn = (rms, outLevel)
                 flushPreRoll = true
-                // Cut-in: stop NUA, drop what was queued, and let the mic through right away.
+                // Confirmed cut-in: stop NUA, drop what was queued, and let the mic through right away.
                 ring.clear()
                 releasing = false
+                pausedAt = 0
+                earlyAudio = false
                 suppressUntil = 0
                 lastReleaseEnd = now
                 lastNuaVoice = 0
             }
+        } else if paused, voiced {
+            lastVoice = now
         }
         os_unfair_lock_unlock(&lock)
         if let cutIn { onCutIn?(cutIn.0, cutIn.1) }
+        if softPause { onSoftPause?() }
         if newVoice { onUserVoice?() }
     }
 
@@ -328,28 +376,43 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
 
         let now = CFAbsoluteTimeGetCurrent()
         var released: Double?
+        var releasedEarly = false
+        var turnDone: (Double, Double)?
         var outSum: Float = 0
         os_unfair_lock_lock(&lock)
-        // Queue NUA's speech. While holding, pauses between its phrases are kept up to 0.6 s (natural rhythm);
-        // while playing, silence is skipped so a backlog drains instead of becoming permanent lag.
+        // Queue NUA's speech with its own pauses (each up to `maxGap`), whether holding or playing a backlog:
+        // skipping silence to drain a backlog squeezed the gaps between words and phrases and made NUA sound
+        // rushed. Leading silence is not queued (latency, not rhythm); when caught up, silence plays as is.
+        let quietFor = now - lastVoice
         if pulledVoiced {
+            if ring.isEmpty, !releasing, pausedAt == 0 { earlyAudio = quietFor < 0.15 } // began while they talked?
             pull.withUnsafeBufferPointer { ring.write($0.baseAddress!, count) }
             silentQueued = 0
             lastNuaVoice = now
-        } else if !releasing, !ring.isEmpty, silentQueued < Int(Self.rate * 0.6) {
-            pull.withUnsafeBufferPointer { ring.write($0.baseAddress!, count) }
-            silentQueued += count
+        } else if !ring.isEmpty {
+            if silentQueued < Int(Self.rate * Self.maxGap) {
+                pull.withUnsafeBufferPointer { ring.write($0.baseAddress!, count) }
+                silentQueued += count
+            } else {
+                turnSkipped += count
+            }
         }
-        let quietFor = now - lastVoice
         if ring.isEmpty { heldSince = 0 } else if heldSince == 0 { heldSince = now }
         let continuation = lastReleaseEnd > 0 && now - lastReleaseEnd < 2.0
+        let hold = earlyAudio ? earlyHoldSeconds : holdSeconds
         var dropped: Double?
-        if !releasing, !ring.isEmpty, quietFor >= holdSeconds, voiceSinceTurn || continuation {
+        if pausedAt > 0 {
+            // Paused by a voice that never became a cut-in (a short sound or echo): resume after a short quiet.
+            if quietFor >= 0.3 { pausedAt = 0; releasing = true; voiceRun = 0 }
+        } else if !releasing, !ring.isEmpty, quietFor >= hold, voiceSinceTurn || continuation {
             releasing = true
+            voiceRun = 0 // the speaker's leftover count must not read as talking over NUA's first syllable
+            let wasEarly = earlyAudio
+            earlyAudio = false
             if voiceSinceTurn {
                 voiceSinceTurn = false
                 // Report once per turn (a turn's audio can arrive in several pieces).
-                if now - lastReleaseEnd > 1.0 { released = quietFor }
+                if now - lastReleaseEnd > 1.0 { released = quietFor; releasedEarly = wasEarly }
             }
         } else if !releasing, !ring.isEmpty, !voiceSinceTurn, !continuation, now - heldSince > 1.5 {
             // NUA started talking with no detected speech before it: never play it.
@@ -359,13 +422,20 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         }
         if releasing {
             let got = ring.read(into: dst, count)
+            turnPlayed += got
             for i in 0..<got { outSum += dst[i] * dst[i] }
             // Mute the model's mic input only while NUA is actually audible, plus a short echo-decay tail.
             // (Muting for the whole "turn" cut the start of the user's reply.)
             if got > 0, sqrt(outSum / Float(got)) > 0.004 { suppressUntil = now + 0.15 }
             if got < count { for i in got..<count { dst[i] = 0 } }
             // NUA's turn ends only after a real gap, not at every pause between its phrases.
-            if ring.isEmpty && !pulledVoiced && now - lastNuaVoice > Self.turnGap { releasing = false; lastReleaseEnd = now }
+            if ring.isEmpty && !pulledVoiced && now - lastNuaVoice > Self.turnGap {
+                releasing = false
+                lastReleaseEnd = now
+                turnDone = (Double(turnPlayed) / Self.rate, Double(turnSkipped) / Self.rate)
+                turnPlayed = 0
+                turnSkipped = 0
+            }
         } else {
             for i in 0..<count { dst[i] = 0 }
         }
@@ -375,7 +445,8 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         os_unfair_lock_unlock(&lock)
         if count < n { for i in count..<n { dst[i] = 0 } }
 
-        if let released { onRelease?(released) }
+        if let released { onRelease?(released, releasedEarly) }
+        if let turnDone { onTurnPlayed?(turnDone.0, turnDone.1) }
         if let dropped { onDroppedUnprompted?(dropped) }
         if holdingNow != holdingReported {
             holdingReported = holdingNow

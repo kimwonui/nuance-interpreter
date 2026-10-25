@@ -59,7 +59,7 @@ struct SettingsSheet: View {
                         .padding(12)
                         if controller.engine == .live {
                             Toggle(isOn: $controller.waitForPause) {
-                                Text("Wait until the speaker stops (0.2 s) before NUA speaks").font(.noto(14, .medium)).foregroundStyle(Theme.text)
+                                Text("Wait until the speaker finishes before NUA speaks (0.2 s, or 0.6 s if they may still be mid-sentence)").font(.noto(14, .medium)).foregroundStyle(Theme.text)
                             }
                             .tint(Theme.accent)
                             .padding(.horizontal, 16)
