@@ -43,7 +43,7 @@ The screen copy, states and colors follow the iOS code, not older Figma frames:
 - `ios/Interpreter/Views/OrbHomeView.swift`: split layout, orb states and status text, Two-way/One-way and Mute/Stop
 - `ios/Interpreter/Views/SplitConversation.swift`: per-half cues and the flowing light
 - `ios/Interpreter/Views/OrbView.swift`: orb motion
-- `ios/Interpreter/Views/LanguagePickerSheet.swift`, `App/Models.swift`: languages, Tried/Experimental, Arabic GPT-Live only
+- `ios/Interpreter/Views/LanguagePickerSheet.swift`, `App/Models.swift`: languages, Arabic GPT-Live only
 
 If the app changes, update these files in the same way.
 
@@ -51,7 +51,7 @@ If the app changes, update these files in the same way.
 
 - The demo is illustrative and labeled that way. It never uses the microphone, plays audio, or makes network requests.
 - No App Store links, sign-up forms, testimonials, user numbers or press logos. NUA is a development build.
-- Interpretation quality is a goal, not a promise. Only Korean and English have been tried; the other languages are Experimental, and Arabic is GPT-Live only.
+- Interpretation quality is a goal, not a promise. All 14 languages are shown the same way, without Tried/Experimental labels (owner decision, 2026-10-25); Arabic runs on GPT-Live.
 - One-way is in the current build but hasn't been tested in real conversations; say so wherever it's described.
 - Data flow: with GPT-Live, audio goes between the phone and OpenAI; the NUA server helps set up the connection and gets numeric diagnostics only; History is kept in memory. Don't claim audio stays on the device or that providers keep nothing.
 

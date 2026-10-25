@@ -6,8 +6,8 @@
   const stripes = (vertical, bands, emblem) => ({ kind: "stripes", vertical, bands, emblem });
 
   NUA.LANGS = [
-    { code: "en", name: "English", native: "English", tried: true, flag: { kind: "usa" } },
-    { code: "ko", name: "Korean", native: "한국어", tried: true, flag: { kind: "korea" } },
+    { code: "en", name: "English", native: "English", flag: { kind: "usa" } },
+    { code: "ko", name: "Korean", native: "한국어", flag: { kind: "korea" } },
     { code: "ja", name: "Japanese", native: "日本語", flag: stripes(false, [[0xffffff, 1]], { kind: "disc", hex: 0xbc002d, ratio: 0.3 }) },
     { code: "zh", name: "Chinese", native: "中文", flag: stripes(false, [[0xde2910, 1]], { kind: "star", hex: 0xffde00 }) },
     { code: "es", name: "Spanish", native: "Español", flag: stripes(false, [[0xaa151b, 1], [0xf1bf00, 2], [0xaa151b, 1]]) },

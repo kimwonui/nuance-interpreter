@@ -80,7 +80,6 @@ h1, h2, h3 { font-weight: 700; }
   display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px;
   font-size: 11px; font-weight: 700; color: var(--accent-text); background: var(--badge); white-space: nowrap;
 }
-.badge.tried { color: var(--text-2); background: var(--selected); }
 
 /* ---------------------------------------------------------------- Shared section type */
 section { position: relative; }
@@ -426,14 +425,12 @@ canvas.orb { position: absolute; left: 50%; top: 50%; width: 260px; height: 260p
 .languages { padding: 128px 16px 112px; }
 .lang-grid { max-width: var(--max); margin: 48px auto 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 12px; }
 .lang-card { padding: 16px 18px; border-radius: var(--r-lg); border: 1px solid var(--line); background: #fff; }
-.lang-card.tried { border-color: rgba(251, 60, 57, 0.32); background: linear-gradient(180deg, #fff 0%, #fff7f6 100%); }
 .lc-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 12px; }
 .lc-top .badge { padding: 0 7px; font-size: 10.5px; }
 .lc-flag { width: 30px; height: 21px; border-radius: 5px; box-shadow: 0 0 0 1px rgba(38, 38, 43, 0.08); }
 .lc-name { font-size: 17px; font-weight: 700; }
 .lc-name em { font-style: normal; font-size: 11px; font-weight: 700; color: var(--text-2); margin-left: 6px; }
 .lc-native { font-size: 14px; color: var(--text-2); }
-.lc-limit { display: block; margin-top: 6px; font-size: 12px; font-weight: 500; color: var(--accent-text); }
 .lang-note { max-width: 680px; margin: 28px auto 0; text-align: center; font-size: 14px; color: var(--text-2); }
 
 /* ---------------------------------------------------------------- FAQ */

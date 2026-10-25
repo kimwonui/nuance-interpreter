@@ -277,7 +277,6 @@
         const { title, sub } = this.halfText(side);
         const chip = half.querySelector(".chip");
         chip.innerHTML = `<span class="chip-name">${lang.name}</span>` +
-          (lang.tried ? "" : '<span class="badge">Experimental</span>') +
           (this.running ? "" : `<span class="chev">${ICON.chevron}</span>`);
         chip.disabled = this.running;
         chip.setAttribute("aria-label", `${side === "me" ? "Your" : "Their"} language: ${lang.name}. Search and change`);
@@ -532,15 +531,13 @@
           <span class="lr-main"><span class="lr-name">${l.name}<em>${l.code.toUpperCase()}</em></span>
           <span class="lr-native">${l.native}${l.liveOnly ? " · GPT-Live only" : ""}</span></span>
           ${l.code === other ? `<span class="lr-other">${side === "me" ? "Their language" : "Your language"}</span>` : ""}
-          <span class="badge ${l.tried ? "tried" : ""}">${l.tried ? "Tried" : "Experimental"}</span>
           <span class="lr-check">${l.code === cur ? ICON.check : ""}</span>`;
-        b.setAttribute("aria-label", `${l.name}, ${l.native}${l.tried ? "" : ", experimental"}${l.liveOnly ? ", GPT-Live only" : ""}${l.code === cur ? ", selected" : ""}`);
+        b.setAttribute("aria-label", `${l.name}, ${l.native}${l.liveOnly ? ", GPT-Live only" : ""}${l.code === cur ? ", selected" : ""}`);
         b.addEventListener("click", () => { this.setLanguage(l.code, side); this.closePicker(); });
         list.appendChild(b);
       });
       list.appendChild(el("p", "sheet-foot",
-        "OpenAI does not publish a language list for GPT-Live. Only Korean and English have been tried; the others are experimental and not tested. " +
-        "Arabic works only with GPT-Live: the backup interpreter model can hear Arabic but can't speak it. Picking the other person's language swaps the two."));
+        "Search by name, native name, or code. Picking the other person's language swaps the two."));
     }
   }
 

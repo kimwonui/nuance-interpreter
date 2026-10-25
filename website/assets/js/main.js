@@ -303,13 +303,12 @@
   const grid = $("#lang-grid");
   NUA.LANGS.forEach((l) => {
     const li = document.createElement("li");
-    li.className = "lang-card" + (l.tried ? " tried" : "");
+    li.className = "lang-card";
     li.innerHTML = `
-      <div class="lc-top"><canvas class="lc-flag" width="60" height="42" aria-hidden="true"></canvas>
-      <span class="badge${l.tried ? " tried" : ""}">${l.tried ? "Tried" : "Experimental"}</span></div>
+      <div class="lc-top"><canvas class="lc-flag" width="60" height="42" aria-hidden="true"></canvas></div>
       <div class="lc-name">${l.name}<em>${l.code.toUpperCase()}</em></div>
       <div class="lc-native" lang="${l.code}">${l.native}</div>
-      ${l.liveOnly ? '<span class="lc-limit">GPT-Live only · quality not checked</span>' : ""}`;
+`;
     const c = li.querySelector("canvas").getContext("2d");
     NUA.paintFlag(c, l.flag, 0, 0, 60, 42, 0, 0, 0);
     grid.appendChild(li);

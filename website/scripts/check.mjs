@@ -49,9 +49,6 @@ const codes = [...js.matchAll(/\{ code: "([a-z]{2})"/g)].map((m) => m[1]);
 const expected = ["en", "ko", "ja", "zh", "es", "fr", "de", "it", "pt", "ru", "hi", "id", "vi", "ar"];
 if (codes.join() !== expected.join()) fail(`language list ${codes.join()} != ${expected.join()}`);
 else ok("14 languages in app order");
-const tried = [...js.matchAll(/\{ code: "([a-z]{2})"[^}]*tried: true/g)].map((m) => m[1]);
-if (tried.join() !== "en,ko") fail("only English and Korean may be marked tried, got " + tried.join());
-else ok("only English and Korean marked tried");
 
 // 5. Copy rules
 const text = (html + "\n" + js).replace(/<[^>]+>/g, " ");
@@ -63,6 +60,7 @@ const forbidden = [
   [/on-device|offline|never leaves|stays on (your|the) (phone|device)/i, "on-device / audio-never-leaves claim"],
   [/chatgpt/i, "ChatGPT comparison"],
   [/server (isn't|is not|not) deployed|coming soon/i, "outdated One-way status"],
+  [/\bexperimental\b|\btried\b|not (been )?tested yet|quality not checked/i, "per-language test labels (owner: all 14 languages work)"],
 ];
 for (const [re, label] of forbidden) {
   const m = text.match(re);
@@ -72,8 +70,6 @@ ok("no forbidden claims");
 const required = [
   "Illustrative demo",
   "Not on the App Store",
-  "Experimental",
-  "GPT-Live only",
   "hasn't been tested in real conversations",
   "numeric diagnostics",
   "not stored permanently",
