@@ -60,7 +60,7 @@ final class InterpreterController: ObservableObject {
         guard autoState == .off, d == .twoWay || oneWayAvailable else { return }
         direction = d
     }
-    /// The chosen pair includes a language the interpreter model can't speak (Arabic): GPT-Live only.
+    /// The chosen pair includes a language the interpreter model can't speak (Arabic, Gujarati): GPT-Live only.
     var pairNeedsLive: Bool { leftLang.liveOnly || rightLang.liveOnly }
     private var liveOnlyName: String { (leftLang.liveOnly ? leftLang : rightLang).name }
     /// Why the current settings can't run the chosen pair (shown instead of starting), or nil.
@@ -71,7 +71,7 @@ final class InterpreterController: ObservableObject {
         if engine == .translate { return "\(liveOnlyName) works only with GPT-Live. Switch the hands-free engine to GPT-Live in Settings." }
         return nil
     }
-    /// GPT-Live is required (Arabic, or one-way): never fall back to the interpreter model.
+    /// GPT-Live is required (Arabic, Gujarati, or one-way): never fall back to the interpreter model.
     private var needsLive: Bool { pairNeedsLive || isOneWay }
     private var needsLiveReason: String { pairNeedsLive ? "\(liveOnlyName) works only with GPT-Live" : "One-way works only with GPT-Live" }
     @Published private(set) var mic: Mic = .undetermined
@@ -424,7 +424,7 @@ final class InterpreterController: ObservableObject {
             autoState = .off
             tokens.report(["mode": "live:failed", "route": String(msg.prefix(40))])
             if wasStarting && needsLive {
-                // The interpreter model can't do this (Arabic voice / one-way): say so instead of switching silently.
+                // The interpreter model can't do this (Arabic or Gujarati voice / one-way): say so instead of switching silently.
                 connectionError = "GPT-Live unavailable (\(msg.prefix(60))). \(needsLiveReason), so NUA did not switch engines."
             } else if wasStarting {
                 // Live couldn't start (e.g. server not updated yet): fall back to the interpreter model.

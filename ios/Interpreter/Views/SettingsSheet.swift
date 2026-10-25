@@ -50,7 +50,7 @@ struct SettingsSheet: View {
                 if controller.mode == .auto {
                     group("Hands-free engine", note: controller.engine == .live
                           ? "GPT-Live (gpt-live-1): full-duplex voice model with built-in turn-taking and interruptions, told to act only as an interpreter for the chosen pair. Billed for the whole time the conversation is on."
-                          : "Interpreter model (gpt-realtime-translate): two dedicated interpretation sessions; NUA picks the direction from the source transcript. Billed only while someone speaks. Can't speak Arabic.") {
+                          : "Interpreter model (gpt-realtime-translate): two dedicated interpretation sessions; NUA picks the direction from the source transcript. Billed only while someone speaks. Can't speak Arabic or Gujarati.") {
                         Picker("Engine", selection: $controller.engine) {
                             Text("GPT-Live").tag(InterpreterController.Engine.live)
                             Text("Interpreter model").tag(InterpreterController.Engine.translate)

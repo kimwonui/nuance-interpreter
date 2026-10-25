@@ -1,11 +1,12 @@
 import Foundation
 import NaturalLanguage
 
-/// Interpretation languages: the 13 output languages OpenAI documents for gpt-realtime-translate, plus Arabic.
+/// Interpretation languages: the 13 output languages OpenAI documents for gpt-realtime-translate, plus Arabic
+/// and Gujarati.
 /// OpenAI publishes no language list for gpt-live-1; only Korean↔English has been tried, the rest are
 /// experimental. The app shows only the languages the deployed server returns (GET /api/languages).
 enum Lang: String, CaseIterable, Identifiable, Codable {
-    case en, ko, ja, zh, es, fr, de, it, pt, ru, hi, id, vi, ar
+    case en, ko, ja, zh, es, fr, de, it, pt, ru, hi, id, vi, ar, gu
 
     var id: String { rawValue }
     var code: String { rawValue.uppercased() }
@@ -25,6 +26,7 @@ enum Lang: String, CaseIterable, Identifiable, Codable {
         case .id: return "Indonesian"
         case .vi: return "Vietnamese"
         case .ar: return "Arabic"
+        case .gu: return "Gujarati"
         }
     }
     /// The language's own name (for search and display next to the English name).
@@ -44,6 +46,7 @@ enum Lang: String, CaseIterable, Identifiable, Codable {
         case .id: return "Bahasa Indonesia"
         case .vi: return "Tiếng Việt"
         case .ar: return "العربية"
+        case .gu: return "ગુજરાતી"
         }
     }
 
@@ -63,9 +66,9 @@ enum Lang: String, CaseIterable, Identifiable, Codable {
     var waitingHint: String { "Other side speaking" }
     /// Only these have been tried with GPT-Live.
     var tried: Bool { self == .ko || self == .en }
-    /// GPT-Live only: gpt-realtime-translate (push to talk and the backup engine) can hear Arabic but has no
-    /// Arabic output voice, so a pair with one of these never runs on that model.
-    var liveOnly: Bool { self == .ar }
+    /// GPT-Live only: gpt-realtime-translate (push to talk and the backup engine) can hear Arabic and Gujarati
+    /// but has no output voice for them, so a pair with one of these never runs on that model.
+    var liveOnly: Bool { self == .ar || self == .gu }
 
     var nlLanguage: NLLanguage {
         switch self {
@@ -83,6 +86,7 @@ enum Lang: String, CaseIterable, Identifiable, Codable {
         case .id: return .indonesian
         case .vi: return .vietnamese
         case .ar: return .arabic
+        case .gu: return .gujarati
         }
     }
 
@@ -101,7 +105,7 @@ enum Lang: String, CaseIterable, Identifiable, Codable {
         case .it: return .stripes(vertical: true, bands: [(0x009246, 1), (0xFFFFFF, 1), (0xCE2B37, 1)], emblem: nil)
         case .pt: return .stripes(vertical: true, bands: [(0x006600, 2), (0xFF0000, 3)], emblem: nil)
         case .ru: return .stripes(vertical: false, bands: [(0xFFFFFF, 1), (0x0039A6, 1), (0xD52B1E, 1)], emblem: nil)
-        case .hi: return .stripes(vertical: false, bands: [(0xFF9933, 1), (0xFFFFFF, 1), (0x138808, 1)], emblem: .ring(0x000080, 0.16))
+        case .hi, .gu: return .stripes(vertical: false, bands: [(0xFF9933, 1), (0xFFFFFF, 1), (0x138808, 1)], emblem: .ring(0x000080, 0.16))
         case .id: return .stripes(vertical: false, bands: [(0xFF0000, 1), (0xFFFFFF, 1)], emblem: nil)
         // Spoken across many countries: a plain pan-Arab green with a white disc, not one country's flag.
         case .ar: return .stripes(vertical: false, bands: [(0x007A3D, 1)], emblem: .disc(0xFFFFFF, 0.18))

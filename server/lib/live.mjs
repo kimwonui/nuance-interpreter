@@ -6,17 +6,17 @@ export const LIVE_MODEL = 'gpt-live-1';
 export const LIVE_SESSIONS_URL = 'https://api.openai.com/v1/live/sessions';
 
 // Offered languages = the 13 output languages OpenAI documents for gpt-realtime-translate (NUA's fallback
-// engine), plus Arabic. OpenAI publishes no language list for gpt-live-1, so only Korean↔English has been
-// tried with it; the rest are offered as experimental.
+// engine), plus Arabic and Gujarati. OpenAI publishes no language list for gpt-live-1, so only Korean↔English
+// has been tried with it; the rest are offered as experimental.
 export const LANGUAGES = {
   en: 'English', ko: 'Korean', ja: 'Japanese', zh: 'Chinese', es: 'Spanish', fr: 'French', de: 'German',
   it: 'Italian', pt: 'Portuguese', ru: 'Russian', hi: 'Hindi', id: 'Indonesian', vi: 'Vietnamese',
-  ar: 'Arabic',
+  ar: 'Arabic', gu: 'Gujarati',
 };
 export const TRIED_LANGUAGES = ['ko', 'en'];
-// gpt-realtime-translate lists Arabic as an input language but not as an output language, so pairs with
-// these run on GPT-Live only (the app never falls back; /api/session rejects them as targets).
-export const LIVE_ONLY_LANGUAGES = ['ar'];
+// gpt-realtime-translate lists Arabic and Gujarati as input languages but not as output languages, so pairs
+// with these run on GPT-Live only (the app never falls back; /api/session rejects them as targets).
+export const LIVE_ONLY_LANGUAGES = ['ar', 'gu'];
 
 export function validPair(langs) {
   if (!Array.isArray(langs) || langs.length !== 2) return null;
@@ -52,6 +52,7 @@ export function buildInstructions(a, b, oneWay = false) {
       : `If an utterance mixes ${A} and ${B}, translate it into the one the speaker used less.`,
     `If someone speaks a language other than ${A} or ${B}, stay silent.`,
     ...(a === 'ar' || b === 'ar' ? ['Speak Arabic translations in clear Modern Standard Arabic; understand any spoken Arabic dialect.'] : []),
+    ...(a === 'gu' || b === 'gu' ? ['Speak Gujarati translations in Gujarati, never in Hindi.'] : []),
     'Do not treat a cough, music, or nearby conversation as speech to translate.',
     'Backchannel policy: never backchannel.',
     'Interruption policy: if the user starts speaking while you are speaking, stop and listen.',
