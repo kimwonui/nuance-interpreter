@@ -6,8 +6,9 @@ import SwiftUI
 ///   alive (they never react to the mic, so they can't fake hearing)
 /// - holding: NUA's voice is buffered until the speaker pauses — slow orbiting dashes, no level reaction
 /// - processing: rotating angular gradient + sweeping arc + orbit dots (connecting)
-/// The body is a liquid blob: bulges travel around the edge in different directions, swell and sink, and merge
-/// as they pass each other, while the whole mass slowly twists. Lit like a jelly (soft highlight, shaded rim).
+/// The body is living, viscous matter (motion reference: a symbiote, not its look): thin tendrils stretch out of
+/// the mass at irregular angles, bend and curl, get sucked back in, and the body wobbles elastically where they
+/// went in. Big slow deformation of the mass, small faster ripples on the edge. Coral, lit like a gel.
 /// Reduce Motion: a still organic shape; each state shows a steady cue instead (ring, arc).
 /// - speaking(lang): follows the real playback level, styled with the output language's decorative flag
 ///   (English: waving stripes; Korean: turning taegeuk; others: waving bands/emblems); nil = neutral
@@ -104,7 +105,8 @@ struct OrbView: View {
             gc.stroke(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)), with: .color(rippleColor.opacity(0.35 * (1 - p) * f.rippleAlpha)), lineWidth: 2)
         }
 
-        let body = blob(center: c, radius: R, amp: f.amp, phase: f.liquidPhase)
+        let ts = tendrilStates(phase: f.liquidPhase, reach: f.tendril, busy: f.busy)
+        let body = shape(center: c, radius: R, amp: f.amp, phase: f.liquidPhase, tendrils: ts)
         if f.grey > 0.99 {
             gc.fill(body, with: .color(Theme.selected))
             return
@@ -155,7 +157,7 @@ struct OrbView: View {
                                                        center: CGPoint(x: c.x - R * 0.25, y: c.y - R * 0.3), startRadius: 0, endRadius: R * 1.35))
             }
         }
-        let lift = edge(R: R, amp: f.amp, phase: f.liquidPhase, theta: -2.3) / R // the highlight follows the upper-left edge
+        let lift = edge(R: R, amp: f.amp, phase: f.liquidPhase, theta: -2.3, tendrils: ts) / R // the highlight follows the upper-left edge
         gc.drawLayer { layer in
             layer.addFilter(.blur(radius: 22 * Double(diameter / 320) + 4))
             layer.opacity = 0.34 * color
@@ -180,40 +182,117 @@ struct OrbView: View {
         }
     }
 
-    /// Bulges that travel around the edge (speed in rad per phase unit; negative = the other direction), each
-    /// swelling and sinking on its own rhythm. Where two pass each other they merge into one larger lobe.
-    private static let lobes: [(speed: Double, width: Double, swell: Double, offset: Double)] = [
-        (0.55, 0.55, 0.9, 0.0), (-0.42, 0.7, 0.7, 2.1), (0.31, 0.45, 1.3, 4.0), (-0.68, 0.5, 1.1, 5.3), (0.18, 0.85, 0.5, 1.2),
-    ]
+    private struct Tendril { var angle, ext, bump, len, curl, seed: Double }
 
-    /// Edge radius at angle `theta`. `amp` ≈ how far the edge can move (fraction of R).
-    private func edge(R: Double, amp: Double, phase w: Double, theta th: Double) -> Double {
-        var d = 0.0
-        for (i, l) in Self.lobes.enumerated() {
-            let center = l.offset + l.speed * w
-            var delta = (th - center).truncatingRemainder(dividingBy: 2 * .pi)
-            if delta > .pi { delta -= 2 * .pi } else if delta < -.pi { delta += 2 * .pi }
-            let strength = sin(w * l.swell + Double(i) * 1.7) * 0.8 + 0.35 // mostly outward, sometimes sinking in
-            d += strength * exp(-(delta * delta) / (2 * l.width * l.width))
-        }
-        // Slow twist of the whole mass (a rotating oval) so the silhouette is never symmetric.
-        d += 0.45 * sin(2 * th - 0.37 * w) + 0.2 * sin(3 * th + 0.23 * w + 1.1)
-        return R * min(1.4, 1 + amp * d * 0.75) // stays inside the orb frame even at the loudest
+    private static func rnd(_ a: Int, _ b: Int, _ k: Int) -> Double {
+        let x = sin(Double(a &* 127 &+ b &* 311 &+ k &* 74) * 12.9898) * 43758.5453
+        return x - floor(x)
     }
 
-    private func blob(center c: CGPoint, radius R: Double, amp: Double, phase w: Double) -> Path {
-        // Sample the edge, then draw smooth curves through the midpoints (no corners).
-        let n = 96
-        let pts: [CGPoint] = (0..<n).map { i in
-            let th = Double(i) / Double(n) * 2 * .pi
-            let r = edge(R: R, amp: amp, phase: w, theta: th)
-            return CGPoint(x: c.x + r * cos(th), y: c.y + r * sin(th))
+    /// Four tendril slots with their own cycle lengths. Each cycle: reach out fast (eases out) → hang and curl →
+    /// sucked back in (eases in) → elastic wobble of the body. Angle, reach, curl side and whether the slot rests
+    /// at all are re-drawn every cycle, so the rhythm never repeats.
+    private func tendrilStates(phase w: Double, reach: Double, busy: Double) -> [Tendril] {
+        guard reach > 0.01 else { return [] }
+        var out: [Tendril] = []
+        for i in 0..<4 {
+            let x = w / (3.0 + 1.3 * Double(i)) + Double(i) * 0.37
+            let n = Int(floor(x)), u = x - floor(x)
+            if Self.rnd(i, n, 0) > busy { continue } // resting this cycle
+            var ext = 0.0, bump = 0.0
+            switch u {
+            case ..<0.3: ext = 1 - pow(1 - u / 0.3, 3)
+            case ..<0.55: ext = 1
+            case ..<0.82: ext = 1 - pow((u - 0.55) / 0.27, 3)
+            default: let p = (u - 0.82) / 0.18; bump = exp(-5 * p) * cos(13 * p)
+            }
+            out.append(Tendril(angle: Self.rnd(i, n, 1) * 2 * .pi + 0.35 * sin(w * 0.6 + Double(i) * 2),
+                               ext: ext, bump: bump * (0.6 + 0.4 * Self.rnd(i, n, 2)),
+                               len: reach * (0.55 + 0.45 * Self.rnd(i, n, 3)),
+                               curl: (Self.rnd(i, n, 4) > 0.5 ? 1 : -1) * (0.6 + 0.8 * Self.rnd(i, n, 5)),
+                               seed: Double(i) * 1.9))
         }
+        return out
+    }
+
+    /// Body edge radius at angle `theta`.
+    private func edge(R: Double, amp: Double, phase w: Double, theta th: Double, tendrils: [Tendril]) -> Double {
+        // Big, slow, non-repeating deformation: harmonics whose phases wander at unrelated rates.
+        var d = 0.55 * sin(2 * th + 1.3 * sin(w * 0.31) + w * 0.17)
+            + 0.4 * sin(3 * th - 1.1 * sin(w * 0.23 + 1) - w * 0.29)
+            + 0.25 * sin(5 * th + 0.9 * sin(w * 0.41 + 2) + w * 0.13)
+        // Small, faster ripples on the surface.
+        d += 0.12 * sin(11 * th - w * 2.6) + 0.07 * sin(16 * th + w * 3.4 + 1.3)
+        var r = R * (1 + amp * d * 0.6)
+        // The mass is pulled toward each tendril (viscous neck) and wobbles where one was sucked back in.
+        for t in tendrils {
+            var delta = (th - t.angle).truncatingRemainder(dividingBy: 2 * .pi)
+            if delta > .pi { delta -= 2 * .pi } else if delta < -.pi { delta += 2 * .pi }
+            r += R * exp(-(delta * delta) / 0.2) * (0.14 * t.ext + 0.12 * t.bump)
+        }
+        return r
+    }
+
+    /// Smooth closed curve through points, wound the same way as the body (so filled together they merge).
+    private func smoothClosed(_ pts: [CGPoint]) -> Path {
+        var area = 0.0
+        for i in pts.indices { let a = pts[i], b = pts[(i + 1) % pts.count]; area += a.x * b.y - b.x * a.y }
+        let p = area < 0 ? Array(pts.reversed()) : pts
         func mid(_ a: CGPoint, _ b: CGPoint) -> CGPoint { CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2) }
         var path = Path()
-        path.move(to: mid(pts[n - 1], pts[0]))
-        for i in 0..<n { path.addQuadCurve(to: mid(pts[i], pts[(i + 1) % n]), control: pts[i]) }
+        path.move(to: mid(p[p.count - 1], p[0]))
+        for i in p.indices { path.addQuadCurve(to: mid(p[i], p[(i + 1) % p.count]), control: p[i]) }
         path.closeSubpath()
+        return path
+    }
+
+    /// Body + tendrils as one shape.
+    private func shape(center c: CGPoint, radius R: Double, amp: Double, phase w: Double, tendrils: [Tendril]) -> Path {
+        let n = 96
+        var path = smoothClosed((0..<n).map { i in
+            let th = Double(i) / Double(n) * 2 * .pi
+            let r = edge(R: R, amp: amp, phase: w, theta: th, tendrils: tendrils)
+            return CGPoint(x: c.x + r * cos(th), y: c.y + r * sin(th))
+        })
+        let half = Double(diameter) / 2
+        for t in tendrils where t.ext > 0.03 {
+            let a = t.angle, u = (cos(a), sin(a)), nrm = (-sin(a), cos(a))
+            let bodyR = edge(R: R, amp: amp, phase: w, theta: a, tendrils: tendrils)
+            let start = bodyR - R * 0.2 // grows out from inside the mass
+            // Shorter up and down, so tips stay clear of the text above/below and inside the frame.
+            let maxTip = min(half - 12, R * (1.25 + 0.25 * abs(cos(a))))
+            let L = max(0, min(maxTip - start, t.len * R + R * 0.2)) * t.ext
+            guard L > R * 0.25 else { continue }
+            let baseW = R * 0.34 * t.ext.squareRoot()
+            let m = 20
+            var spine: [(CGPoint, Double)] = []
+            for k in 0...m {
+                let s = Double(k) / Double(m)
+                // Hooks to one side as it stretches, with a faster whip travelling along it.
+                let lateral = t.curl * L * 0.4 * s * s * (0.6 + 0.4 * sin(w * 0.9 + t.seed)) + L * 0.07 * s * sin(3 * .pi * s - w * 2.4 + t.seed)
+                let rr = start + s * L
+                spine.append((CGPoint(x: c.x + rr * u.0 + lateral * nrm.0, y: c.y + rr * u.1 + lateral * nrm.1),
+                              baseW * pow(1 - s, 1.4) + 1.6))
+            }
+            var left: [CGPoint] = [], right: [CGPoint] = []
+            for k in 0...m {
+                let a0 = spine[max(0, k - 1)].0, a1 = spine[min(m, k + 1)].0
+                var dx = a1.x - a0.x, dy = a1.y - a0.y
+                let len = max(0.001, (dx * dx + dy * dy).squareRoot()); dx /= len; dy /= len
+                let (p, wdt) = spine[k]
+                left.append(CGPoint(x: p.x - dy * wdt / 2, y: p.y + dx * wdt / 2))
+                right.append(CGPoint(x: p.x + dy * wdt / 2, y: p.y - dx * wdt / 2))
+            }
+            path.addPath(smoothClosed(left + right.reversed()))
+            // A small gooey drop at the tip while stretched.
+            if t.ext > 0.6 {
+                let tip = spine[m].0, dr = R * 0.07 * t.ext
+                path.addPath(smoothClosed((0..<12).map { j in
+                    let th = Double(j) / 12 * 2 * .pi
+                    return CGPoint(x: tip.x + dr * cos(th), y: tip.y + dr * sin(th))
+                }))
+            }
+        }
         return path
     }
 }
@@ -225,6 +304,7 @@ final class OrbDriver {
         var angular = 0.0, dots = 0.0, grey = 0.0, rippleAlpha = 0.0, hold = 0.0, flag = 0.0
         var flow = 0.0, halo = 0.0, sweep = 0.0
         var flowPhase = 0.0, haloP = 0.0, sweepAngle = 0.0, liquidPhase = 0.0
+        var tendril = 0.0, busy = 0.0
         var flagLang: Lang?
         var rotation = 0.0, wobblePhase = 0.0, holdAngle = 0.0, flagPhase = 0.0, flagAngle = 0.0
         var ripples: [Double] = []
@@ -257,27 +337,31 @@ final class OrbDriver {
         case .idle:
             // Stopped (tap to start): visibly alive, calmer than listening, no rings.
             goal.scale = reduce ? 1 : 1.0 + 0.03 * sin(2 * .pi * t / 3.6)
-            goal.amp = reduce ? 0.08 : 0.13
+            goal.amp = reduce ? 0.07 : 0.1
+            goal.tendril = 0.75; goal.busy = 0.55
             goal.glow = reduce ? 0.22 : 0.26 + 0.08 * sin(2 * .pi * t / 3.2)
             goal.flow = reduce ? 0 : 0.35
         case .listening:
             // Ambient motion (time-based) + the real mic level on top. Quiet ≠ frozen, and nothing here reacts
             // to sound except `v`.
             goal.scale = reduce ? 1 + 0.06 * v : 1.05 + 0.02 * sin(2 * .pi * t / 2.6) + 0.1 * v
-            goal.amp = reduce ? 0.08 : 0.16 + 0.04 * v
+            goal.amp = reduce ? 0.07 : 0.12 + 0.04 * v
+            goal.tendril = 1; goal.busy = 0.85
             goal.glow = 0.5; goal.bodyOpacity = 1
             goal.rings = reduce ? 0 : 0.1 + 0.3 * v
             goal.flow = reduce ? 0 : 0.45
             goal.halo = 1
         case .holding:
             goal.scale = 1.0
-            goal.amp = reduce ? 0.06 : 0.09
+            goal.amp = reduce ? 0.05 : 0.07
+            goal.tendril = 0.45; goal.busy = 0.4
             goal.glow = 0.3; goal.bodyOpacity = 1
             goal.hold = 1
             goal.flow = reduce ? 0 : 0.6
         case .processing:
             goal.scale = reduce ? 1.02 : 1.02 + 0.025 * sin(2 * .pi * t / 1.4)
-            goal.amp = reduce ? 0.06 : 0.11
+            goal.amp = reduce ? 0.06 : 0.09
+            goal.tendril = 0.5; goal.busy = 0.9
             goal.glow = 0.38; goal.bodyOpacity = 1
             goal.angular = 1; goal.dots = reduce ? 0 : 1
             goal.sweep = 1
@@ -301,6 +385,7 @@ final class OrbDriver {
         ease(&cur.rippleAlpha, goal.rippleAlpha); ease(&cur.hold, goal.hold)
         ease(&cur.flag, goal.flag)
         ease(&cur.flow, goal.flow); ease(&cur.halo, goal.halo); ease(&cur.sweep, goal.sweep)
+        ease(&cur.tendril, goal.tendril); ease(&cur.busy, goal.busy)
         settled = mode == .disabled && abs(cur.grey - 1) < 0.01 && abs(cur.scale - 0.96) < 0.002
 
         if !reduce {
@@ -313,9 +398,9 @@ final class OrbDriver {
             if mode == .processing { sweepAngle += dt * 2 * .pi / 1.4 }
             // Viscous pace; quiet listening flows a bit faster than stopped, real speech speeds it up a little.
             let liquidSpeed: Double = switch mode {
-            case .idle: 0.45
-            case .listening: 0.7 + 0.8 * v
-            case .processing: 1.1
+            case .idle: 0.5
+            case .listening: 0.75 + 0.6 * v
+            case .processing: 1.2
             case .holding: 0.35
             case .speaking: 0.6
             case .disabled: 0
