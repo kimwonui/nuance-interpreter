@@ -6,7 +6,9 @@ import SwiftUI
 ///   alive (they never react to the mic, so they can't fake hearing)
 /// - holding: NUA's voice is buffered until the speaker pauses — slow orbiting dashes, no level reaction
 /// - processing: rotating angular gradient + sweeping arc + orbit dots (connecting)
-/// Reduce Motion: no movement; each state shows a steady cue instead (ring, arc).
+/// The body is a liquid blob: bulges travel around the edge in different directions, swell and sink, and merge
+/// as they pass each other, while the whole mass slowly twists. Lit like a jelly (soft highlight, shaded rim).
+/// Reduce Motion: a still organic shape; each state shows a steady cue instead (ring, arc).
 /// - speaking(lang): follows the real playback level, styled with the output language's decorative flag
 ///   (English: waving stripes; Korean: turning taegeuk; others: waving bands/emblems); nil = neutral
 ///   gradient. Flags are a visual cue for the output language only — the status text names it in words.
@@ -102,7 +104,7 @@ struct OrbView: View {
             gc.stroke(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)), with: .color(rippleColor.opacity(0.35 * (1 - p) * f.rippleAlpha)), lineWidth: 2)
         }
 
-        let body = blob(center: c, radius: R, amp: f.amp, phase: f.wobblePhase)
+        let body = blob(center: c, radius: R, amp: f.amp, phase: f.liquidPhase)
         if f.grey > 0.99 {
             gc.fill(body, with: .color(Theme.selected))
             return
@@ -144,12 +146,29 @@ struct OrbView: View {
             }
             if case .korea = lang.flag { gc.stroke(body, with: .color(Theme.selected.opacity(f.flag)), lineWidth: 1.5) }
         }
-        // Highlight
+        // Jelly volume: shaded lower-right rim, soft highlight and a small specular spot that ride on the shape
+        if f.flag < 0.99 {
+            gc.drawLayer { layer in
+                layer.clip(to: body)
+                layer.opacity = 0.35 * color * (1 - f.flag)
+                layer.fill(body, with: .radialGradient(Gradient(colors: [.clear, .clear, Color(UIColor(hex: 0xB0153E)).opacity(0.55)]),
+                                                       center: CGPoint(x: c.x - R * 0.25, y: c.y - R * 0.3), startRadius: 0, endRadius: R * 1.35))
+            }
+        }
+        let lift = edge(R: R, amp: f.amp, phase: f.liquidPhase, theta: -2.3) / R // the highlight follows the upper-left edge
         gc.drawLayer { layer in
-            layer.addFilter(.blur(radius: 26))
-            layer.opacity = 0.3 * color
-            let hr = R * 0.55
-            layer.fill(Path(ellipseIn: CGRect(x: c.x - R * 0.75, y: c.y - R * 0.85, width: hr * 2, height: hr * 2)), with: .color(.white))
+            layer.addFilter(.blur(radius: 22 * Double(diameter / 320) + 4))
+            layer.opacity = 0.34 * color
+            let hr = R * 0.5
+            let hc = CGPoint(x: c.x - R * 0.36 * lift, y: c.y - R * 0.42 * lift)
+            layer.fill(Path(ellipseIn: CGRect(x: hc.x - hr, y: hc.y - hr * 0.8, width: hr * 2, height: hr * 1.6)), with: .color(.white))
+        }
+        gc.drawLayer { layer in
+            layer.addFilter(.blur(radius: 5))
+            layer.opacity = 0.55 * color * (1 - f.flag)
+            let sr = R * 0.14
+            let sc = CGPoint(x: c.x - R * 0.5 * lift, y: c.y - R * 0.55 * lift)
+            layer.fill(Path(ellipseIn: CGRect(x: sc.x - sr, y: sc.y - sr * 0.7, width: sr * 2, height: sr * 1.4)), with: .color(.white))
         }
         // Processing orbit dots
         if f.dots > 0.01 {
@@ -161,16 +180,39 @@ struct OrbView: View {
         }
     }
 
-    private func blob(center c: CGPoint, radius R: Double, amp: Double, phase w: Double) -> Path {
-        var path = Path()
-        let n = 120
-        for i in 0...n {
-            let th = Double(i) / Double(n) * 2 * .pi
-            let wobble = 0.5 * sin(3 * th + w) + 0.3 * sin(5 * th - 1.3 * w + 1.7) + 0.2 * sin(7 * th + 0.7 * w + 2.3)
-            let r = R * (1 + amp * wobble)
-            let p = CGPoint(x: c.x + r * cos(th), y: c.y + r * sin(th))
-            if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
+    /// Bulges that travel around the edge (speed in rad per phase unit; negative = the other direction), each
+    /// swelling and sinking on its own rhythm. Where two pass each other they merge into one larger lobe.
+    private static let lobes: [(speed: Double, width: Double, swell: Double, offset: Double)] = [
+        (0.55, 0.55, 0.9, 0.0), (-0.42, 0.7, 0.7, 2.1), (0.31, 0.45, 1.3, 4.0), (-0.68, 0.5, 1.1, 5.3), (0.18, 0.85, 0.5, 1.2),
+    ]
+
+    /// Edge radius at angle `theta`. `amp` ≈ how far the edge can move (fraction of R).
+    private func edge(R: Double, amp: Double, phase w: Double, theta th: Double) -> Double {
+        var d = 0.0
+        for (i, l) in Self.lobes.enumerated() {
+            let center = l.offset + l.speed * w
+            var delta = (th - center).truncatingRemainder(dividingBy: 2 * .pi)
+            if delta > .pi { delta -= 2 * .pi } else if delta < -.pi { delta += 2 * .pi }
+            let strength = sin(w * l.swell + Double(i) * 1.7) * 0.8 + 0.35 // mostly outward, sometimes sinking in
+            d += strength * exp(-(delta * delta) / (2 * l.width * l.width))
         }
+        // Slow twist of the whole mass (a rotating oval) so the silhouette is never symmetric.
+        d += 0.45 * sin(2 * th - 0.37 * w) + 0.2 * sin(3 * th + 0.23 * w + 1.1)
+        return R * min(1.4, 1 + amp * d * 0.75) // stays inside the orb frame even at the loudest
+    }
+
+    private func blob(center c: CGPoint, radius R: Double, amp: Double, phase w: Double) -> Path {
+        // Sample the edge, then draw smooth curves through the midpoints (no corners).
+        let n = 96
+        let pts: [CGPoint] = (0..<n).map { i in
+            let th = Double(i) / Double(n) * 2 * .pi
+            let r = edge(R: R, amp: amp, phase: w, theta: th)
+            return CGPoint(x: c.x + r * cos(th), y: c.y + r * sin(th))
+        }
+        func mid(_ a: CGPoint, _ b: CGPoint) -> CGPoint { CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2) }
+        var path = Path()
+        path.move(to: mid(pts[n - 1], pts[0]))
+        for i in 0..<n { path.addQuadCurve(to: mid(pts[i], pts[(i + 1) % n]), control: pts[i]) }
         path.closeSubpath()
         return path
     }
@@ -182,7 +224,7 @@ final class OrbDriver {
         var scale = 1.0, amp = 0.0, glow = 0.22, bodyOpacity = 0.92, rings = 0.0
         var angular = 0.0, dots = 0.0, grey = 0.0, rippleAlpha = 0.0, hold = 0.0, flag = 0.0
         var flow = 0.0, halo = 0.0, sweep = 0.0
-        var flowPhase = 0.0, haloP = 0.0, sweepAngle = 0.0
+        var flowPhase = 0.0, haloP = 0.0, sweepAngle = 0.0, liquidPhase = 0.0
         var flagLang: Lang?
         var rotation = 0.0, wobblePhase = 0.0, holdAngle = 0.0, flagPhase = 0.0, flagAngle = 0.0
         var ripples: [Double] = []
@@ -192,7 +234,7 @@ final class OrbDriver {
     private var cur = Frame()
     private var v: Double = 0
     private var rotation = 0.0, wobble = 0.0, holdAngle = 0.0, flagPhase = 0.0, flagAngle = -0.5
-    private var flowPhase = 0.0, haloP = 0.0, sweepAngle = -Double.pi / 2
+    private var flowPhase = 0.0, haloP = 0.0, sweepAngle = -Double.pi / 2, liquidPhase = 0.0
     private var rippleStarts: [Double] = []
     private var lastRipple = 0.0
     private(set) var settled = false
@@ -214,28 +256,28 @@ final class OrbDriver {
         switch mode {
         case .idle:
             // Stopped (tap to start): visibly alive, calmer than listening, no rings.
-            goal.scale = reduce ? 1 : 1.02 + 0.035 * sin(2 * .pi * t / 3.2)
-            goal.amp = reduce ? 0 : 0.018
+            goal.scale = reduce ? 1 : 1.0 + 0.03 * sin(2 * .pi * t / 3.6)
+            goal.amp = reduce ? 0.08 : 0.13
             goal.glow = reduce ? 0.22 : 0.26 + 0.08 * sin(2 * .pi * t / 3.2)
-            goal.flow = reduce ? 0 : 0.55
+            goal.flow = reduce ? 0 : 0.35
         case .listening:
             // Ambient motion (time-based) + the real mic level on top. Quiet ≠ frozen, and nothing here reacts
             // to sound except `v`.
-            goal.scale = reduce ? 1 + 0.06 * v : 1.07 + 0.025 * sin(2 * .pi * t / 2.6) + 0.18 * v
-            goal.amp = reduce ? 0 : 0.035 + 0.08 * v
+            goal.scale = reduce ? 1 + 0.06 * v : 1.05 + 0.02 * sin(2 * .pi * t / 2.6) + 0.1 * v
+            goal.amp = reduce ? 0.08 : 0.16 + 0.04 * v
             goal.glow = 0.5; goal.bodyOpacity = 1
             goal.rings = reduce ? 0 : 0.1 + 0.3 * v
-            goal.flow = reduce ? 0 : 0.8
+            goal.flow = reduce ? 0 : 0.45
             goal.halo = 1
         case .holding:
             goal.scale = 1.0
-            goal.amp = reduce ? 0 : 0.015
+            goal.amp = reduce ? 0.06 : 0.09
             goal.glow = 0.3; goal.bodyOpacity = 1
             goal.hold = 1
             goal.flow = reduce ? 0 : 0.6
         case .processing:
-            goal.scale = reduce ? 1.02 : 1.03 + 0.03 * sin(2 * .pi * t / 1.4)
-            goal.amp = reduce ? 0 : 0.03
+            goal.scale = reduce ? 1.02 : 1.02 + 0.025 * sin(2 * .pi * t / 1.4)
+            goal.amp = reduce ? 0.06 : 0.11
             goal.glow = 0.38; goal.bodyOpacity = 1
             goal.angular = 1; goal.dots = reduce ? 0 : 1
             goal.sweep = 1
@@ -269,6 +311,16 @@ final class OrbDriver {
             flowPhase += dt * (mode == .processing ? 1.4 : mode == .listening ? 0.8 : 0.45)
             if cur.halo > 0.01 { haloP = (haloP + dt / 2.8).truncatingRemainder(dividingBy: 1) }
             if mode == .processing { sweepAngle += dt * 2 * .pi / 1.4 }
+            // Viscous pace; quiet listening flows a bit faster than stopped, real speech speeds it up a little.
+            let liquidSpeed: Double = switch mode {
+            case .idle: 0.45
+            case .listening: 0.7 + 0.8 * v
+            case .processing: 1.1
+            case .holding: 0.35
+            case .speaking: 0.6
+            case .disabled: 0
+            }
+            liquidPhase += dt * liquidSpeed
             if case .some(.some(let l)) = speakingLang {
                 if case .korea = l.flag { flagAngle += dt * 2 * .pi / 6.0 }      // turning taegeuk
                 else { flagPhase += dt * 2 * .pi / 1.2; flagAngle += dt * 2 * .pi / 8.0 } // waving bands
@@ -284,6 +336,7 @@ final class OrbDriver {
         cur.flowPhase = flowPhase
         cur.haloP = haloP
         cur.sweepAngle = sweepAngle
+        cur.liquidPhase = liquidPhase
         cur.ripples = rippleStarts.map { (t - $0) / 1.4 }
         return cur
     }
