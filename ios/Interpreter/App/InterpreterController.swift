@@ -162,23 +162,29 @@ final class InterpreterController: ObservableObject {
 
     // MARK: Hands-free
 
-    /// Starts listening. Only called from the Start button.
+    /// True when tapping Start (or the orb) would start a conversation right now.
+    var canStart: Bool { mode == .auto && autoState == .off && phase != .playing && mic != .denied && engineLimit == nil }
+
+    /// Starts listening. Called from the Start button and from a tap on the orb.
     func startConversation() {
-        guard autoState == .off else { return }
+        guard canStart else { return }
+        // Leave .off right away: a second tap (orb or button) before the mic permission returns must not open a
+        // second session. Every early exit below goes back to .off so Start works again.
+        autoState = .connecting
         if engine == .live { startLive(); return }
-        guard engineLimit == nil else { return }
         startTranslateEngine()
     }
 
     private func startTranslateEngine() {
         Task {
             mic = await Self.micPermission(request: true)
-            guard mic == .granted else { return }
+            guard mic == .granted else { autoState = .off; return }
             do {
                 try audio.start(voiceProcessing: true)
                 running = true
             } catch {
                 connectionError = "Couldn't start audio: \(error.localizedDescription)"
+                autoState = .off
                 return
             }
             connectionError = nil
@@ -238,7 +244,7 @@ final class InterpreterController: ObservableObject {
     private func startLive() {
         Task {
             mic = await Self.micPermission(request: true)
-            guard mic == .granted else { return }
+            guard mic == .granted else { autoState = .off; return }
             if running { audio.stop(); running = false } // WebRTC owns the audio session in this mode
             connectionError = nil
             engineNote = nil

@@ -31,9 +31,15 @@ struct OrbHomeView: View {
                 .rotationEffect(.degrees(180))
             VStack(spacing: 2) {
                 OrbView(mode: orbMode, inputLevel: controller.level, outputLevel: controller.outputLevel,
-                        accessibilityText: "\(status.title). \(status.sub)", diameter: 190)
+                        accessibilityText: controller.canStart ? "Start conversation" : "\(status.title). \(status.sub)", diameter: 190)
                     .frame(height: 170)
-                    .onTapGesture { if controller.phase == .playing || controller.autoState == .speaking { controller.stopPlayback() } }
+                    .contentShape(Circle())
+                    // Stopped: one tap starts, exactly like Start conversation. Otherwise only the existing
+                    // "tap to stop NUA's voice"; a tap never stops or mutes the conversation.
+                    .onTapGesture { orbTapped() }
+                    .accessibilityAddTraits(controller.canStart ? .isButton : [])
+                    .accessibilityHint(controller.canStart ? "Turns on the microphone and starts listening for \(controller.leftLang.name) or \(controller.rightLang.name)" : "")
+                    .accessibilityAction { orbTapped() }
                 Text(status.title).font(.noto(16, .bold)).foregroundStyle(Theme.text)
                 Text("\(controller.leftLang.name) ↔ \(controller.rightLang.name)").font(.noto(12, .medium)).foregroundStyle(Theme.textSecondary)
                     .accessibilityLabel("\(controller.leftLang.name) and \(controller.rightLang.name), both directions")
@@ -108,6 +114,11 @@ struct OrbHomeView: View {
 
     // MARK: 상태
 
+    private func orbTapped() {
+        if controller.canStart { controller.startConversation(); return }
+        if controller.phase == .playing || controller.autoState == .speaking { controller.stopPlayback() }
+    }
+
     private var orbMode: OrbView.Mode {
         if controller.mic == .denied { return .disabled }
         if controller.mode == .auto, controller.autoState != .off {
@@ -134,9 +145,10 @@ struct OrbHomeView: View {
         if controller.mode == .auto {
             switch controller.autoState {
             case .off:
-                if controller.connectionError != nil { return ("Not connected", "Mic off · Not listening") }
                 if controller.phase == .playing { return ("Speaking" + (controller.speakingLanguage.map { " \($0.name)" } ?? ""), "Tap the orb to stop") }
-                return ("Ready", "Mic off · Tap Start conversation")
+                if controller.engineLimit != nil { return ("Ready", "Mic off") }
+                if controller.connectionError != nil { return ("Not connected", "Tap to try again · Mic off") }
+                return ("Tap to start", "Mic off · Tap the orb or Start conversation")
             case .connecting: return ("Connecting…", "Getting the interpreter ready")
             case .waiting, .hearing:
                 if controller.liveHolding { return ("Waiting for you to finish", "NUA speaks after a short pause") }
