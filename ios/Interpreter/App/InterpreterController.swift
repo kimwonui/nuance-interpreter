@@ -56,6 +56,13 @@ final class InterpreterController: ObservableObject {
         }
     }
     @Published private(set) var engineNote: String?
+    /// GPT-Live: hold NUA's voice until the speaker has paused for 0.5 s (app-enforced; see GatedAudioDevice).
+    @Published var waitForPause: Bool = UserDefaults.standard.object(forKey: "liveWaitForPause") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(waitForPause, forKey: "liveWaitForPause")
+            if live != nil { stopConversation() }
+        }
+    }
 
     var serverDescription: String { tokens.serverDescription }
 
@@ -196,10 +203,18 @@ final class InterpreterController: ObservableObject {
             liveInput = ""
             liveSessionTurnID = nil
             liveStarted = false
-            let s = LiveSession()
+            let s = LiveSession(waitForPause: waitForPause)
             live = s
             s.onEvent = { [weak self] e in self?.liveEvent(e) }
             s.onLevels = { [weak self] i, o in self?.liveLevels(i, o) }
+            s.onRelease = { [weak self] dt in
+                guard let self else { return }
+                let dir = self.turns.last.map { "\($0.source.code)→\($0.target.code)" } ?? "?"
+                if let id = self.liveSessionTurnID { self.update(id) { $0.metrics.tPlaybackStart = CFAbsoluteTimeGetCurrent() } }
+                self.latency.append(LatencySample(direction: dir, speechSec: 0, endToFirstSound: dt, endToClosed: nil))
+                // Exact: last detected user speech → first released NUA audio (≥ 0.5 s by design).
+                self.tokens.report(["mode": "live:gated", "direction": dir, "endToFirstSound": dt, "route": AudioIO.routeName()])
+            }
             s.start { [weak self] offer in
                 guard let self else { throw CancellationError() }
                 return try await self.tokens.liveAnswer(offer: offer)
@@ -269,7 +284,7 @@ final class InterpreterController: ObservableObject {
         if input > 0.03 && autoState != .muted { liveLastLoudIn = now; liveFirstSoundPending = true }
         let speakingNow = output > 0.02
         if speakingNow && !liveOutputOn { live?.ensureSpeaker() }
-        if speakingNow && !liveOutputOn && liveFirstSoundPending {
+        if speakingNow && !liveOutputOn && liveFirstSoundPending && !waitForPause {
             liveFirstSoundPending = false
             let gap = now - liveLastLoudIn
             if gap < 10 {

@@ -57,6 +57,14 @@ struct SettingsSheet: View {
                         }
                         .pickerStyle(.segmented)
                         .padding(12)
+                        if controller.engine == .live {
+                            Toggle(isOn: $controller.waitForPause) {
+                                Text("Wait for a 0.5 s pause before NUA speaks").font(.noto(14, .medium)).foregroundStyle(Theme.text)
+                            }
+                            .tint(Theme.accent)
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 12)
+                        }
                     }
                 }
 

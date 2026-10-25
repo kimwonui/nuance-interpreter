@@ -20,11 +20,26 @@ final class LiveSession: NSObject {
     var onEvent: ((Event) -> Void)?
     /// Mic level and NUA's playback level (0…1, from WebRTC stats every 0.1 s).
     var onLevels: ((Float, Float) -> Void)?
+    /// Hold-until-pause mode: seconds from the user's last speech to NUA's first released audio.
+    var onRelease: ((Double) -> Void)?
 
-    private static let factory: RTCPeerConnectionFactory = {
+    /// Standard WebRTC audio (plays NUA as soon as it arrives).
+    private static let standardFactory: RTCPeerConnectionFactory = {
         RTCInitializeSSL()
         return RTCPeerConnectionFactory(encoderFactory: RTCDefaultVideoEncoderFactory(), decoderFactory: RTCDefaultVideoDecoderFactory())
     }()
+    /// App-owned audio device that holds NUA's voice until the user has paused (see GatedAudioDevice).
+    static let gatedDevice = GatedAudioDevice()
+    private static let gatedFactory: RTCPeerConnectionFactory = {
+        RTCInitializeSSL()
+        return RTCPeerConnectionFactory(encoderFactory: RTCDefaultVideoEncoderFactory(), decoderFactory: RTCDefaultVideoDecoderFactory(), audioDevice: gatedDevice)
+    }()
+
+    let gated: Bool
+    init(waitForPause: Bool) {
+        gated = waitForPause
+        super.init()
+    }
 
     private var pc: RTCPeerConnection?
     private var channel: RTCDataChannel?
@@ -36,16 +51,23 @@ final class LiveSession: NSObject {
 
     /// `exchange` posts our SDP offer to the server and returns OpenAI's SDP answer.
     func start(exchange: @escaping (String) async throws -> String) {
-        configureAudioSession()
+        let factory = gated ? Self.gatedFactory : Self.standardFactory
+        if gated {
+            let device = Self.gatedDevice
+            device.onLevels = { [weak self] i, o in Task { @MainActor in self?.onLevels?(i, o) } }
+            device.onRelease = { [weak self] dt in Task { @MainActor in self?.onRelease?(dt) } }
+        } else {
+            configureAudioSession()
+        }
         let config = RTCConfiguration()
         config.sdpSemantics = .unifiedPlan
         let constraints = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)
-        guard let pc = Self.factory.peerConnection(with: config, constraints: constraints, delegate: self) else {
+        guard let pc = factory.peerConnection(with: config, constraints: constraints, delegate: self) else {
             onEvent?(.failed("Couldn't create the audio connection")); return
         }
         self.pc = pc
-        let source = Self.factory.audioSource(with: constraints)
-        let track = Self.factory.audioTrack(with: source, trackId: "nua-mic")
+        let source = factory.audioSource(with: constraints)
+        let track = factory.audioTrack(with: source, trackId: "nua-mic")
         pc.add(track, streamIds: ["nua"])
         micTrack = track
         let dcConfig = RTCDataChannelConfiguration()
@@ -60,7 +82,7 @@ final class LiveSession: NSObject {
                     try await pc.setLocalDescription(offer)
                     let answer = try await exchange(offer.sdp)
                     try await pc.setRemoteDescription(RTCSessionDescription(type: .answer, sdp: answer))
-                    self.startStats()
+                    if !self.gated { self.startStats() }
                     // WebRTC starts its audio unit after negotiation; re-check the route once it has.
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.ensureSpeaker() }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.ensureSpeaker() }
@@ -94,6 +116,11 @@ final class LiveSession: NSObject {
         pc = nil
         channel = nil
         micTrack = nil
+        if gated {
+            Self.gatedDevice.onLevels = nil
+            Self.gatedDevice.onRelease = nil
+            return
+        }
         let s = RTCAudioSession.sharedInstance()
         s.lockForConfiguration()
         try? s.setActive(false)
@@ -137,6 +164,7 @@ final class LiveSession: NSObject {
 
     /// If playback is on the earpiece, switch to the built-in speaker (headphones/Bluetooth are left alone).
     func ensureSpeaker() {
+        if gated { Self.gatedDevice.ensureSpeaker(); return }
         let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
         guard outputs.contains(where: { $0.portType == .builtInReceiver }) else { return }
         let s = RTCAudioSession.sharedInstance()
