@@ -26,13 +26,14 @@ targets:
       properties:
         CFBundleDisplayName: NUA
         CFBundleShortVersionString: "0.1.0"
-        CFBundleVersion: "1"
+        CFBundleVersion: "2"
         UILaunchScreen:
           UIColorName: ""
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIRequiresFullScreen: true
         NSMicrophoneUsageDescription: NUA uses the microphone to interpret what you say. Audio is not saved.
         ITSAppUsesNonExemptEncryption: false
+        NSCameraUsageDescription: NUA never uses the camera. Its voice connection library can also carry video, so iOS requires this note; NUA does not turn video on.
         NSLocalNetworkUsageDescription: During development, NUA connects to the interpretation server on your local network.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
