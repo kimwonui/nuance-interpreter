@@ -10,3 +10,4 @@ ios/Interpreter/Config/Secrets.xcconfig
 xcuserdata/
 *.xcuserstate
 DerivedData/
+ios/build-release/
