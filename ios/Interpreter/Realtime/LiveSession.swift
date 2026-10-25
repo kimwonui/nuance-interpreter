@@ -24,6 +24,8 @@ final class LiveSession: NSObject {
     var onRelease: ((Double) -> Void)?
     var onHoldChange: ((Bool) -> Void)?
     var onCutIn: ((Float, Float) -> Void)?
+    var onUserVoice: (() -> Void)?
+    var onDroppedUnprompted: ((Double) -> Void)?
 
     /// Standard WebRTC audio (plays NUA as soon as it arrives).
     private static let standardFactory: RTCPeerConnectionFactory = {
@@ -64,6 +66,8 @@ final class LiveSession: NSObject {
             device.onRelease = { [weak self] dt in Task { @MainActor in self?.onRelease?(dt) } }
             device.onHoldChange = { [weak self] h in Task { @MainActor in self?.onHoldChange?(h) } }
             device.onCutIn = { [weak self] m, o in Task { @MainActor in self?.onCutIn?(m, o) } }
+            device.onUserVoice = { [weak self] in Task { @MainActor in self?.onUserVoice?() } }
+            device.onDroppedUnprompted = { [weak self] sec in Task { @MainActor in self?.onDroppedUnprompted?(sec) } }
         } else {
             configureAudioSession()
         }
@@ -132,6 +136,8 @@ final class LiveSession: NSObject {
                 Self.gatedDevice.onRelease = nil
                 Self.gatedDevice.onHoldChange = nil
                 Self.gatedDevice.onCutIn = nil
+                Self.gatedDevice.onUserVoice = nil
+                Self.gatedDevice.onDroppedUnprompted = nil
                 Self.gatedOwner = nil
             }
             return

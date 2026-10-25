@@ -25,6 +25,10 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     var onHoldChange: ((Bool) -> Void)?
     /// A cut-in stopped NUA: mic level and NUA's playing level at that moment (diagnostics).
     var onCutIn: ((Float, Float) -> Void)?
+    /// The phone detected the user (or the other person) starting to speak.
+    var onUserVoice: (() -> Void)?
+    /// NUA audio that arrived with no detected speech before it was discarded (seconds of audio).
+    var onDroppedUnprompted: ((Double) -> Void)?
     private var holdingReported = false
 
     private weak var adm: RTCAudioDeviceDelegate?
@@ -53,6 +57,10 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     private static let turnGap = 0.6
     /// Smoothed level of what NUA is playing; echo of NUA's own voice tracks it, a real interruption exceeds it.
     private var outLevel: Float = 0
+    /// Speech was detected since NUA last started a turn. NUA may only start speaking after real speech
+    /// (owner rule: never produce what nobody said). Continuations within 2 s of its last turn are allowed.
+    private var voiceSinceTurn = false
+    private var heldSince: Double = 0
 
     // Render-thread scratch (preallocated).
     private var pull = [Int16](repeating: 0, count: 8_192)
@@ -88,6 +96,8 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         lastReleaseEnd = 0
         lastNuaVoice = 0
         outLevel = 0
+        voiceSinceTurn = false
+        heldSince = 0
         os_unfair_lock_unlock(&lock)
         holdingReported = false
     }
@@ -237,8 +247,10 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
             if !playing { noiseFloor = min(0.03, noiseFloor * 0.98 + rms * 0.02) }
         }
         var cutIn: (Float, Float)?
+        var newVoice = false
         if voiceRun >= needed {
             lastVoice = now
+            if !voiceSinceTurn { voiceSinceTurn = true; newVoice = true }
             if playing {
                 cutIn = (rms, outLevel)
                 // Cut-in: stop NUA, drop what was queued, and let the mic through right away.
@@ -251,6 +263,7 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         }
         os_unfair_lock_unlock(&lock)
         if let cutIn { onCutIn?(cutIn.0, cutIn.1) }
+        if newVoice { onUserVoice?() }
     }
 
     // MARK: WebRTC → hold-until-pause gate → speaker
@@ -290,10 +303,21 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
             silentQueued += count
         }
         let quietFor = now - lastVoice
-        if !releasing, !ring.isEmpty, quietFor >= holdSeconds {
+        if ring.isEmpty { heldSince = 0 } else if heldSince == 0 { heldSince = now }
+        let continuation = lastReleaseEnd > 0 && now - lastReleaseEnd < 2.0
+        var dropped: Double?
+        if !releasing, !ring.isEmpty, quietFor >= holdSeconds, voiceSinceTurn || continuation {
             releasing = true
-            // Report once per turn (a turn's audio can arrive in several pieces).
-            if now - lastReleaseEnd > 1.0 { released = quietFor }
+            if voiceSinceTurn {
+                voiceSinceTurn = false
+                // Report once per turn (a turn's audio can arrive in several pieces).
+                if now - lastReleaseEnd > 1.0 { released = quietFor }
+            }
+        } else if !releasing, !ring.isEmpty, !voiceSinceTurn, !continuation, now - heldSince > 1.5 {
+            // NUA started talking with no detected speech before it: never play it.
+            dropped = Double(ring.count) / Self.rate
+            ring.clear()
+            heldSince = 0
         }
         if releasing {
             suppressUntil = now + 0.4
@@ -312,6 +336,7 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         if count < n { for i in count..<n { dst[i] = 0 } }
 
         if let released { onRelease?(released) }
+        if let dropped { onDroppedUnprompted?(dropped) }
         if holdingNow != holdingReported {
             holdingReported = holdingNow
             onHoldChange?(holdingNow)
@@ -329,6 +354,7 @@ private struct Ring {
     private var r = 0, w = 0, n = 0
     init(capacity: Int) { buf = [Int16](repeating: 0, count: capacity) }
     var isEmpty: Bool { n == 0 }
+    var count: Int { n }
     mutating func clear() { r = 0; w = 0; n = 0 }
     mutating func write(_ src: UnsafePointer<Int16>, _ count: Int) {
         for i in 0..<count {

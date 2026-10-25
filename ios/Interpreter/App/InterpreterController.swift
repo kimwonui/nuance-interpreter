@@ -112,6 +112,10 @@ final class InterpreterController: ObservableObject {
     private var liveOutputOn = false
     private var liveFirstSoundPending = false
     private var liveStarted = false
+    /// Last time the phone detected someone speaking, and when the last Live turn was created.
+    /// A new caption/turn is only allowed after real detected speech (never show what nobody said).
+    private var liveUserVoiceAt: Double = 0
+    private var liveLastTurnAt: Double = 0
     private let log = Logger(subsystem: "interp", category: "latency")
 
     init() {
@@ -230,6 +234,10 @@ final class InterpreterController: ObservableObject {
             autoState = .connecting
             turnSide = nil
             speakerSide = nil
+            liveUserVoiceAt = 0
+            liveLastTurnAt = 0
+            liveLastOut = 0
+            liveSessionTurnID = nil
             liveInput = ""
             liveSessionTurnID = nil
             liveStarted = false
@@ -239,6 +247,14 @@ final class InterpreterController: ObservableObject {
             s.onEvent = { [weak self, weak s] e in guard let self, let s, self.live === s else { return }; self.liveEvent(e) }
             s.onLevels = { [weak self, weak s] i, o in guard let self, let s, self.live === s else { return }; self.liveLevels(i, o) }
             s.onHoldChange = { [weak self, weak s] h in guard let self, let s, self.live === s else { return }; self.liveHolding = h }
+            s.onUserVoice = { [weak self, weak s] in
+                guard let self, let s, self.live === s else { return }
+                self.liveUserVoiceAt = CFAbsoluteTimeGetCurrent()
+            }
+            s.onDroppedUnprompted = { [weak self, weak s] sec in
+                guard let self, let s, self.live === s else { return }
+                self.tokens.report(["mode": "live:dropped-unprompted", "speechSec": sec])
+            }
             s.onCutIn = { [weak self, weak s] mic, out in
                 guard let self, let s, self.live === s else { return }
                 self.tokens.report(["mode": "live:cutin", "route": String(format: "mic %.3f out %.3f", mic, out)])
@@ -272,7 +288,12 @@ final class InterpreterController: ObservableObject {
             if let id = liveSessionTurnID { update(id) { $0.sourceText += d } }
             if let lang = Lang.detect(liveInput, among: (leftLang, rightLang)) { speakerSide = side(of: lang); turnSide = speakerSide }
         case .outputText(let d):
-            if liveSessionTurnID == nil || now - liveLastOut > 1.5 {
+            let newTurn = liveSessionTurnID == nil || now - liveLastOut > 1.5
+            // With the pause gate on, a new turn needs speech detected after the previous turn;
+            // otherwise this is unprompted model output (its audio is discarded by the gate too).
+            if newTurn && waitForPause && liveUserVoiceAt <= liveLastTurnAt { return }
+            if newTurn {
+                liveLastTurnAt = now
                 let pair = (leftLang, rightLang)
                 let other: (Lang) -> Lang = { $0 == pair.0 ? pair.1 : pair.0 }
                 let src = Lang.detect(liveInput, among: pair) ?? Lang.detect(d, among: pair).map(other) ?? pair.0
