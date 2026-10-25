@@ -4,14 +4,16 @@ import SwiftUI
 /// clouds that blend and drift all the time. Breathing and level reactions are kept small; the inner flow is
 /// what shows it's alive. NUA's coral palette.
 /// - idle: calm, slower flow (mic off, tap to start)
-/// - listening: livelier flow; size and rings follow the real mic level only (the flow never reacts to sound)
+/// - listening: reacts to the real mic level only — while someone talks, sound rings flow INTO the orb (the
+///   opposite of speaking's outward ripples), the clouds speed up and the core brightens, the orb swells a little;
+///   in silence it settles to a calm, attentive drift (no fake reaction)
 /// - holding: NUA's voice is buffered until the speaker pauses — slow orbiting dashes, no level reaction
 /// - processing: faster flow + rotating gradient, sweeping arc and orbit dots (connecting)
 /// - speaking(lang): follows the real playback level, styled with the output language's decorative flag
 ///   (English: waving stripes; Korean: turning taegeuk; others: waving bands/emblems); nil = neutral clouds.
 ///   Flags are a visual cue for the output language only — the status text names it in words.
 /// - disabled: static grey (error, no permission, muted) — never pretends to listen
-/// Reduce Motion: the clouds stand still and the orb doesn't scale; state cues stay (arc, rings, dashes).
+/// Reduce Motion: the clouds stand still, no rings move; the orb still swells slightly and brightens with the real voice.
 struct OrbView: View {
     enum Mode: Equatable { case idle, listening, holding, processing, speaking(Lang?), disabled }
 
@@ -82,10 +84,11 @@ struct OrbView: View {
                 layer.fill(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r + 12, width: r * 2, height: r * 2)), with: .linearGradient(linear, startPoint: tl, endPoint: br))
             }
         }
-        // Listening rings (real mic level only)
-        for (k, op) in [(1.14, 0.22), (1.26, 0.1)] where f.rings > 0.01 {
-            let r = R * k
-            gc.stroke(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)), with: .color(Theme.accent.opacity(op * f.rings * 2.2)), lineWidth: 2)
+        // Listening: sound rings drawn in toward the orb, one per burst of real voice, as strong as that voice
+        for (p, strength) in f.inRipples {
+            let r = R * (1.42 - 0.4 * p)
+            gc.stroke(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)),
+                      with: .color(Theme.accent.opacity(0.45 * strength * sin(.pi * p))), lineWidth: 2 + 1.5 * strength)
         }
         // Connecting: a bright arc sweeping around the orb
         if f.sweep > 0.01 {
@@ -128,11 +131,13 @@ struct OrbView: View {
             gc.drawLayer { layer in
                 layer.clip(to: body)
                 layer.addFilter(.blur(radius: R * 0.38))
-                layer.opacity = f.flow * base * color
+                layer.opacity = min(1, f.flow + 0.2 * f.voice) * base * color
                 for (hex, size, sx, sy, off) in Self.clouds {
                     let p = CGPoint(x: c.x + R * 0.5 * sin(f.flowPhase * sx + off),
                                     y: c.y + R * 0.5 * cos(f.flowPhase * sy + off * 1.3))
-                    let r = R * size * (1 + 0.12 * sin(f.flowPhase * 0.7 + off)) // clouds swell and thin as they drift
+                    // Clouds swell and thin as they drift; the light one grows with the real voice (core brightens).
+                    let voiceGrow = hex == 0xFFFFFF ? 0.45 * f.voice : 0
+                    let r = R * size * (1 + 0.12 * sin(f.flowPhase * 0.7 + off) + voiceGrow)
                     layer.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)),
                                with: .color(Color(UIColor(hex: hex)).opacity(hex == 0xFFFFFF ? 0.6 : 0.85)))
                 }
@@ -175,12 +180,13 @@ struct OrbView: View {
 /// Eases every visual parameter toward the current mode's target (state changes take ~250 ms).
 final class OrbDriver {
     struct Frame {
-        var scale = 1.0, glow = 0.22, bodyOpacity = 0.92, rings = 0.0
+        var scale = 1.0, glow = 0.22, bodyOpacity = 0.92, voice = 0.0
         var angular = 0.0, dots = 0.0, grey = 0.0, rippleAlpha = 0.0, hold = 0.0, flag = 0.0
         var flow = 0.0, sweep = 0.0
         var flagLang: Lang?
         var rotation = 0.0, holdAngle = 0.0, flagPhase = 0.0, flagAngle = 0.0, flowPhase = 0.0, sweepAngle = 0.0
         var ripples: [Double] = []
+        var inRipples: [(Double, Double)] = [] // (progress 0…1, strength of the voice that started it)
     }
 
     private var last: Double?
@@ -189,6 +195,8 @@ final class OrbDriver {
     private var rotation = 0.0, holdAngle = 0.0, flagPhase = 0.0, flagAngle = -0.5
     private var flowPhase = 0.0, sweepAngle = -Double.pi / 2
     private var rippleStarts: [Double] = []
+    private var inStarts: [(Double, Double)] = []
+    private var lastInRipple = 0.0
     private var lastRipple = 0.0
     private(set) var settled = false
 
@@ -212,10 +220,11 @@ final class OrbDriver {
             goal.scale = reduce ? 1 : 1 + 0.012 * sin(2 * .pi * t / 4.0)
             goal.flow = 0.8
         case .listening:
-            goal.scale = reduce ? 1 + 0.04 * v : 1.02 + 0.07 * v
-            goal.glow = 0.42; goal.bodyOpacity = 1
-            goal.rings = reduce ? 0 : 0.08 + 0.3 * v
-            goal.flow = 1
+            // Quiet: calm, attentive breathing. Voice: swells and glows with the real level.
+            goal.scale = reduce ? 1 + 0.04 * v : 1.02 + 0.01 * sin(2 * .pi * t / 2.4) + 0.12 * v
+            goal.glow = 0.38 + 0.3 * v; goal.bodyOpacity = 1
+            goal.flow = 0.9
+            goal.voice = v
         case .holding:
             goal.scale = 1.0
             goal.glow = 0.3; goal.bodyOpacity = 1
@@ -241,7 +250,8 @@ final class OrbDriver {
         let k = min(1, dt / 0.25)
         func ease(_ a: inout Double, _ b: Double) { a += (b - a) * k }
         ease(&cur.scale, goal.scale); ease(&cur.glow, goal.glow)
-        ease(&cur.bodyOpacity, goal.bodyOpacity); ease(&cur.rings, goal.rings)
+        ease(&cur.bodyOpacity, goal.bodyOpacity)
+        cur.voice = goal.voice // already smoothed (v), follows the voice without extra lag
         ease(&cur.angular, goal.angular); ease(&cur.dots, goal.dots); ease(&cur.grey, goal.grey)
         ease(&cur.rippleAlpha, goal.rippleAlpha); ease(&cur.hold, goal.hold)
         ease(&cur.flag, goal.flag); ease(&cur.flow, goal.flow); ease(&cur.sweep, goal.sweep)
@@ -254,7 +264,8 @@ final class OrbDriver {
             // A steady pace per state — it never follows the mic. (×1.4 of the first cloud version, owner's ask.)
             let flowSpeed: Double = switch mode {
             case .idle: 0.77
-            case .listening, .speaking: 1.26
+            case .listening: 1.0 + 2.2 * v // calmer than before in silence, clearly quicker while someone talks
+            case .speaking: 1.26
             case .processing: 1.96
             case .holding: 0.7
             case .disabled: 0
@@ -265,8 +276,10 @@ final class OrbDriver {
                 else { flagPhase += dt * 2 * .pi / 1.2; flagAngle += dt * 2 * .pi / 8.0 } // waving bands
             }
             if isSpeaking, v > 0.05, t - lastRipple > 0.6 { rippleStarts.append(t); lastRipple = t }
+            if mode == .listening, v > 0.08, t - lastInRipple > 0.35 { inStarts.append((t, min(1, v * 1.4))); lastInRipple = t }
         }
         rippleStarts.removeAll { t - $0 > 1.4 }
+        inStarts.removeAll { t - $0.0 > 0.9 }
         cur.rotation = rotation
         cur.holdAngle = holdAngle
         cur.flagPhase = flagPhase
@@ -274,6 +287,7 @@ final class OrbDriver {
         cur.flowPhase = flowPhase
         cur.sweepAngle = sweepAngle
         cur.ripples = rippleStarts.map { (t - $0) / 1.4 }
+        cur.inRipples = inStarts.map { ((t - $0.0) / 0.9, $0.1) }
         return cur
     }
 }
