@@ -241,6 +241,7 @@ final class LiveSession: NSObject {
               let type = obj["type"] as? String else { return }
         switch type {
         case "session.started":
+            if gated { Self.gatedDevice.playChime(.start) } // "ready, listening"
             onEvent?(.started)
         case "session.input_transcript.delta":
             if let d = obj["delta"] as? String { onEvent?(.inputText(d)) }

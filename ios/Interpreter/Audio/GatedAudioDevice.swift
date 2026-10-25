@@ -82,6 +82,42 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     private var earlyAudio = false
     /// NUA paused by the user's voice, waiting for a confirmed cut-in or a resume (0 = not paused).
     private var pausedAt: Double = 0
+    /// Notification sounds, synthesized once. Mixed into NUA's own output (so Apple's echo canceller removes them
+    /// from the mic) while the model gets silence and the speech detector ignores the mic (so a chime can never
+    /// count as someone speaking or cut NUA off).
+    enum Chime { case start, heard }
+    private static func tones(_ notes: [(freq: Double, at: Double)], length: Double, amp: Float) -> [Float] {
+        var out = [Float](repeating: 0, count: Int(rate * length))
+        for note in notes {
+            for i in Int(note.at * rate)..<out.count {
+                let t = Double(i) / rate - note.at
+                let env = min(1, t / 0.005) * exp(-t / 0.07)
+                out[i] += amp * Float(env * (sin(2 * .pi * note.freq * t) + 0.25 * sin(4 * .pi * note.freq * t)))
+            }
+        }
+        return out
+    }
+    /// Start: two rising notes. Heard (NUA starts interpreting): one short soft ding.
+    private static let startChime = tones([(1046.5, 0), (1568.0, 0.09)], length: 0.34, amp: 0.16)
+    private static let heardChime = tones([(1318.5, 0)], length: 0.2, amp: 0.12)
+    private var chime: [Float] = []
+    private var chimePos = 0
+    private var chimeUntil: Double = 0 // speech detection ignores the mic until then (chime + echo tail)
+
+    func playChime(_ c: Chime) {
+        os_unfair_lock_lock(&lock)
+        startChimeLocked(c)
+        os_unfair_lock_unlock(&lock)
+    }
+
+    private func startChimeLocked(_ c: Chime) {
+        chime = c == .start ? Self.startChime : Self.heardChime
+        chimePos = 0
+        let until = CFAbsoluteTimeGetCurrent() + Double(chime.count) / Self.rate + 0.15
+        chimeUntil = until
+        suppressUntil = max(suppressUntil, until)
+    }
+
     /// Wrong-direction output was cut: ignore NUA's audio until the next detected speech.
     private var discarding = false
     private var turnPlayed = 0
@@ -133,6 +169,9 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         outLevel = 0
         voiceSinceTurn = false
         heldSince = 0
+        chime = []
+        chimePos = 0
+        chimeUntil = 0
         earlyAudio = false
         pausedAt = 0
         discarding = false
@@ -341,6 +380,7 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         os_unfair_lock_lock(&lock)
         let playing = releasing
         let paused = pausedAt > 0
+        if now < chimeUntil { os_unfair_lock_unlock(&lock); return } // our own chime, not someone speaking
         // While NUA plays, the voice must be above a fixed floor, above the noise floor, AND clearly above the
         // level NUA is playing at (its own echo follows that level; a person talking over it exceeds it).
         // Paused: NUA is silent, so no echo — a moderate bar. Otherwise: a lower bar, used to time the pause.
@@ -459,7 +499,11 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
             if voiceSinceTurn {
                 voiceSinceTurn = false
                 // Report once per turn (a turn's audio can arrive in several pieces).
-                if now - lastReleaseEnd > 1.0 { released = quietFor; releasedEarly = wasEarly }
+                if now - lastReleaseEnd > 1.0 {
+                    released = quietFor
+                    releasedEarly = wasEarly
+                    startChimeLocked(.heard) // "heard you": NUA starts interpreting this turn
+                }
             }
         } else if !releasing, !ring.isEmpty, !voiceSinceTurn, !continuation, now - heldSince > 1.5 {
             // NUA started talking with no detected speech before it: never play it.
@@ -488,6 +532,12 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         }
         let level = sqrt(outSum / Float(max(count, 1)))
         outLevel = releasing ? outLevel * 0.8 + level * 0.2 : 0
+        // Mix the chime on top (after the level, so it never counts as NUA's voice).
+        if chimePos < chime.count {
+            let k = min(count, chime.count - chimePos)
+            for i in 0..<k { dst[i] += chime[chimePos + i] }
+            chimePos += k
+        }
         let holdingNow = !releasing && !ring.isEmpty
         os_unfair_lock_unlock(&lock)
         if count < n { for i in count..<n { dst[i] = 0 } }
