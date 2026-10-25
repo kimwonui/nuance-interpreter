@@ -84,22 +84,26 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     private var pausedAt: Double = 0
     /// Notification sounds, synthesized once. Mixed into NUA's own output (so Apple's echo canceller removes them
     /// from the mic) while the model gets silence and the speech detector ignores the mic (so a chime can never
-    /// count as someone speaking or cut NUA off).
+    /// count as someone speaking or cut NUA off). That window is only the chime itself + 50 ms of echo decay
+    /// (≈ 0.21 s for the turn ding): people start talking ~0.3 s or more after hearing a cue, so their first
+    /// words arrive after it. The muted window is not replayed to the model afterwards, because it contains the
+    /// chime itself.
     enum Chime { case start, yourTurn }
     private static func tones(_ notes: [(freq: Double, at: Double)], length: Double, amp: Float) -> [Float] {
         var out = [Float](repeating: 0, count: Int(rate * length))
         for note in notes {
             for i in Int(note.at * rate)..<out.count {
                 let t = Double(i) / rate - note.at
-                let env = min(1, t / 0.005) * exp(-t / 0.07)
+                let fadeOut = min(1, Double(out.count - i) / (rate * 0.03)) // ends at silence: no click, short window
+                let env = min(1, t / 0.005) * exp(-t / 0.07) * fadeOut
                 out[i] += amp * Float(env * (sin(2 * .pi * note.freq * t) + 0.25 * sin(4 * .pi * note.freq * t)))
             }
         }
         return out
     }
     /// Start: two rising notes. Your turn (NUA finished speaking a translation): one short soft ding.
-    private static let startChime = tones([(1046.5, 0), (1568.0, 0.09)], length: 0.34, amp: 0.16)
-    private static let yourTurnChime = tones([(1318.5, 0)], length: 0.2, amp: 0.12)
+    private static let startChime = tones([(1046.5, 0), (1568.0, 0.09)], length: 0.3, amp: 0.16)
+    private static let yourTurnChime = tones([(1318.5, 0)], length: 0.16, amp: 0.12)
     private var chime: [Float] = []
     private var chimePos = 0
     /// Ding when NUA finishes speaking a translation, so the other person knows it's their turn (two-way only;
@@ -120,7 +124,7 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     private func startChimeLocked(_ c: Chime) {
         chime = c == .start ? Self.startChime : Self.yourTurnChime
         chimePos = 0
-        let until = CFAbsoluteTimeGetCurrent() + Double(chime.count) / Self.rate + 0.15
+        let until = CFAbsoluteTimeGetCurrent() + Double(chime.count) / Self.rate + 0.05
         chimeUntil = until
         suppressUntil = max(suppressUntil, until)
     }
@@ -529,8 +533,9 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
                 turnDone = (Double(turnPlayed) / Self.rate, Double(turnSkipped) / Self.rate)
                 turnPlayed = 0
                 turnSkipped = 0
-                // NUA finished this translation (not a cut-in or a discarded answer): "your turn".
-                if turnEndChime { startChimeLocked(.yourTurn) }
+                // NUA finished this translation (not a cut-in or a discarded answer): "your turn" — unless someone
+                // already started answering, so the ding never mutes the beginning of a reply.
+                if turnEndChime, now - lastVoice > Self.turnGap { startChimeLocked(.yourTurn) }
             }
         } else {
             for i in 0..<count { dst[i] = 0 }
