@@ -26,6 +26,34 @@ enum Lang: String, CaseIterable, Identifiable, Codable {
         case .vi: return "Vietnamese"
         }
     }
+    /// The language's own name (for search and display next to the English name).
+    var nativeName: String {
+        switch self {
+        case .en: return "English"
+        case .ko: return "한국어"
+        case .ja: return "日本語"
+        case .zh: return "中文"
+        case .es: return "Español"
+        case .fr: return "Français"
+        case .de: return "Deutsch"
+        case .it: return "Italiano"
+        case .pt: return "Português"
+        case .ru: return "Русский"
+        case .hi: return "हिन्दी"
+        case .id: return "Bahasa Indonesia"
+        case .vi: return "Tiếng Việt"
+        }
+    }
+
+    /// Search by English name, native name, or code (case- and accent-insensitive).
+    func matches(_ query: String) -> Bool {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return true }
+        let opts: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
+        return name.range(of: q, options: opts) != nil || nativeName.range(of: q, options: opts) != nil
+            || rawValue.range(of: q, options: opts) != nil
+    }
+
     var speakTitle: String { "Speak \(name)" }
     var speakHint: String { "Tap and speak" }
     var listeningTitle: String { "Listening… tap to end" }

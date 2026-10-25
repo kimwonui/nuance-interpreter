@@ -9,6 +9,7 @@ struct SideHalf: View {
     let side: InterpreterController.Side
     let cue: Cue
 
+    @State private var showPicker = false
     private var lang: Lang { side == .me ? controller.leftLang : controller.rightLang }
     private var otherLang: Lang { side == .me ? controller.rightLang : controller.leftLang }
     private var editable: Bool { controller.autoState == .off }
@@ -44,12 +45,12 @@ struct SideHalf: View {
         .frame(height: 34)
         .background(Theme.surfaceRaised.opacity(0.9), in: Capsule())
         if editable {
-            Menu {
-                ForEach(controller.availableLangs) { l in
-                    Button(l.tried ? l.name : "\(l.name) (experimental)") { controller.setLanguage(l, for: side) }
+            Button { showPicker = true } label: { label }
+                .accessibilityLabel("\(side == .me ? "Your" : "Their") language: \(lang.name). Double-tap to search and change")
+                .sheet(isPresented: $showPicker) {
+                    LanguagePickerSheet(controller: controller, side: side)
+                        .presentationDetents([.large])
                 }
-            } label: { label }
-            .accessibilityLabel("\(side == .me ? "Your" : "Their") language: \(lang.name)")
         } else {
             label
         }
