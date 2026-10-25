@@ -1,15 +1,29 @@
 import Foundation
+import NaturalLanguage
 
-/// 통역 언어. 엔진(gpt-realtime-translate)은 출력 13개 언어를 지원하므로 여기에 케이스만 늘리면 확장된다.
+/// Interpretation languages: the 13 output languages OpenAI documents for gpt-realtime-translate.
+/// OpenAI publishes no language list for gpt-live-1; only Korean↔English has been tried, the rest are
+/// experimental. The app shows only the languages the deployed server returns (GET /api/languages).
 enum Lang: String, CaseIterable, Identifiable, Codable {
-    case ko, en
+    case en, ko, ja, zh, es, fr, de, it, pt, ru, hi, id, vi
 
     var id: String { rawValue }
     var code: String { rawValue.uppercased() }
     var name: String {
         switch self {
-        case .ko: return "Korean"
         case .en: return "English"
+        case .ko: return "Korean"
+        case .ja: return "Japanese"
+        case .zh: return "Chinese"
+        case .es: return "Spanish"
+        case .fr: return "French"
+        case .de: return "German"
+        case .it: return "Italian"
+        case .pt: return "Portuguese"
+        case .ru: return "Russian"
+        case .hi: return "Hindi"
+        case .id: return "Indonesian"
+        case .vi: return "Vietnamese"
         }
     }
     var speakTitle: String { "Speak \(name)" }
@@ -17,6 +31,67 @@ enum Lang: String, CaseIterable, Identifiable, Codable {
     var listeningTitle: String { "Listening… tap to end" }
     var cutInHint: String { "Tap to cut in" }
     var waitingHint: String { "Other side speaking" }
+    /// Only these have been tried with GPT-Live.
+    var tried: Bool { self == .ko || self == .en }
+
+    var nlLanguage: NLLanguage {
+        switch self {
+        case .en: return .english
+        case .ko: return .korean
+        case .ja: return .japanese
+        case .zh: return .simplifiedChinese
+        case .es: return .spanish
+        case .fr: return .french
+        case .de: return .german
+        case .it: return .italian
+        case .pt: return .portuguese
+        case .ru: return .russian
+        case .hi: return .hindi
+        case .id: return .indonesian
+        case .vi: return .vietnamese
+        }
+    }
+
+    /// Decorative flag style for the language (a visual cue, not a nationality). Languages spoken in many
+    /// countries use one representative flag and are always shown together with the language name.
+    var flag: FlagArt {
+        switch self {
+        case .en: return .usa
+        case .ko: return .korea
+        case .ja: return .stripes(vertical: false, bands: [(0xFFFFFF, 1)], emblem: .disc(0xBC002D, 0.3))
+        case .zh: return .stripes(vertical: false, bands: [(0xDE2910, 1)], emblem: .star(0xFFDE00))
+        case .vi: return .stripes(vertical: false, bands: [(0xDA251D, 1)], emblem: .star(0xFFFF00))
+        case .es: return .stripes(vertical: false, bands: [(0xAA151B, 1), (0xF1BF00, 2), (0xAA151B, 1)], emblem: nil)
+        case .fr: return .stripes(vertical: true, bands: [(0x002395, 1), (0xFFFFFF, 1), (0xED2939, 1)], emblem: nil)
+        case .de: return .stripes(vertical: false, bands: [(0x000000, 1), (0xDD0000, 1), (0xFFCE00, 1)], emblem: nil)
+        case .it: return .stripes(vertical: true, bands: [(0x009246, 1), (0xFFFFFF, 1), (0xCE2B37, 1)], emblem: nil)
+        case .pt: return .stripes(vertical: true, bands: [(0x006600, 2), (0xFF0000, 3)], emblem: nil)
+        case .ru: return .stripes(vertical: false, bands: [(0xFFFFFF, 1), (0x0039A6, 1), (0xD52B1E, 1)], emblem: nil)
+        case .hi: return .stripes(vertical: false, bands: [(0xFF9933, 1), (0xFFFFFF, 1), (0x138808, 1)], emblem: .ring(0x000080, 0.16))
+        case .id: return .stripes(vertical: false, bands: [(0xFF0000, 1), (0xFFFFFF, 1)], emblem: nil)
+        }
+    }
+
+    /// Which of the two chosen languages a text is in (nil if too short or unclear).
+    static func detect(_ text: String, among pair: (Lang, Lang)) -> Lang? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 2 else { return nil }
+        let r = NLLanguageRecognizer()
+        r.languageConstraints = [pair.0.nlLanguage, pair.1.nlLanguage]
+        r.processString(trimmed)
+        let hyp = r.languageHypotheses(withMaximum: 2)
+        let a = hyp[pair.0.nlLanguage] ?? 0, b = hyp[pair.1.nlLanguage] ?? 0
+        guard max(a, b) >= 0.6 else { return nil }
+        return a >= b ? pair.0 : pair.1
+    }
+}
+
+/// Decorative flag drawings used by the orb and the split-screen backgrounds.
+enum FlagArt {
+    enum Emblem { case disc(UInt32, Double), star(UInt32), ring(UInt32, Double) }
+    case usa
+    case korea
+    case stripes(vertical: Bool, bands: [(UInt32, Int)], emblem: Emblem?)
 }
 
 enum TurnStatus: Equatable {

@@ -5,9 +5,9 @@ import SwiftUI
 /// - listening: follows the real mic level (only shown while the mic is actually live)
 /// - holding: NUA's voice is buffered until the speaker pauses — slow orbiting dashes, no level reaction
 /// - processing: rotating angular gradient + orbit dots (connecting)
-/// - speaking(lang): follows the real playback level. English = stripes-and-canton style with a waving
-///   motion; Korean = taegeuk style with a turning motion; nil = neutral gradient. Flags are a visual cue
-///   for the output language only — the status text always says it in words.
+/// - speaking(lang): follows the real playback level, styled with the output language's decorative flag
+///   (English: waving stripes; Korean: turning taegeuk; others: waving bands/emblems); nil = neutral
+///   gradient. Flags are a visual cue for the output language only — the status text names it in words.
 /// - disabled: static grey (stopped, error, no permission, muted) — never pretends to listen
 struct OrbView: View {
     enum Mode: Equatable { case idle, listening, holding, processing, speaking(Lang?), disabled }
@@ -16,6 +16,7 @@ struct OrbView: View {
     let inputLevel: Float
     let outputLevel: Float
     var accessibilityText: String = ""
+    var diameter: CGFloat = 320
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var scheme
@@ -37,7 +38,7 @@ struct OrbView: View {
                     .transition(.opacity)
             }
         }
-        .frame(width: 320, height: 320)
+        .frame(width: diameter, height: diameter)
         .accessibilityElement()
         .accessibilityLabel(accessibilityText)
         .accessibilityAddTraits(.updatesFrequently)
@@ -47,14 +48,12 @@ struct OrbView: View {
 
     private func draw(_ gc: inout GraphicsContext, size: CGSize, f: OrbDriver.Frame) {
         let c = CGPoint(x: size.width / 2, y: size.height / 2)
-        let R = 95 * f.scale
+        let R = 95 * f.scale * Double(diameter / 320)
         let stops = scheme == .dark ? [0xFF6E33, 0xFF4A66, 0xFF4090] : [0xFF5A1E, 0xF8324E, 0xF0276A]
         let colors = stops.map { Color(UIColor(hex: UInt32($0))) }
         let linear = Gradient(stops: [.init(color: colors[0], location: 0), .init(color: colors[1], location: 0.62), .init(color: colors[2], location: 1)])
         let tl = CGPoint(x: c.x - R, y: c.y - R), br = CGPoint(x: c.x + R, y: c.y + R)
         let color = 1 - f.grey
-        let usRed = Color(UIColor(hex: 0xB22234)), usBlue = Color(UIColor(hex: 0x3C3B6E))
-        let krRed = Color(UIColor(hex: 0xCD2E3A)), krBlue = Color(UIColor(hex: 0x0047A0))
 
         // Glow (tinted toward the output language while speaking)
         if f.glow * color > 0.01 {
@@ -64,8 +63,6 @@ struct OrbView: View {
                 let r = R * 1.02
                 let rect = CGRect(x: c.x - r, y: c.y - r + 12, width: r * 2, height: r * 2)
                 layer.fill(Path(ellipseIn: rect), with: .linearGradient(linear, startPoint: tl, endPoint: br))
-                if f.en > 0.01 { var l = layer; l.opacity = f.en; l.fill(Path(ellipseIn: rect), with: .color(usBlue)) }
-                if f.ko > 0.01 { var l = layer; l.opacity = f.ko; l.fill(Path(ellipseIn: rect), with: .color(krBlue)) }
             }
         }
         // Listening rings (mic level)
@@ -81,7 +78,7 @@ struct OrbView: View {
             gc.stroke(ring, with: .color(Theme.accent.opacity(0.45 * f.hold)), style: StrokeStyle(lineWidth: 2.5, lineCap: .round, dash: [6, 10]))
         }
         // Output ripples (playback level)
-        let rippleColor = f.en > 0.5 ? usBlue : f.ko > 0.5 ? krBlue : Theme.accent
+        let rippleColor = Theme.accent
         for p in f.ripples {
             let r = R * (1 + 0.5 * p)
             gc.stroke(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)), with: .color(rippleColor.opacity(0.35 * (1 - p) * f.rippleAlpha)), lineWidth: 2)
@@ -93,7 +90,7 @@ struct OrbView: View {
             return
         }
         // Base gradient body
-        let base = max(0, 1 - f.en - f.ko)
+        let base = max(0, 1 - f.flag)
         if base > 0.01 {
             var g = gc
             g.opacity = f.bodyOpacity * base
@@ -103,54 +100,15 @@ struct OrbView: View {
                 g.fill(body, with: .linearGradient(linear, startPoint: tl, endPoint: br))
             }
         }
-        // English style: red/white stripes that wave + blue canton with stars
-        if f.en > 0.01 {
+        // Output-language flag style (decorative cue; the status text names the language)
+        if f.flag > 0.01, let lang = f.flagLang {
             gc.drawLayer { layer in
-                layer.opacity = f.en
+                layer.opacity = f.flag
                 layer.clip(to: body)
                 let box = CGRect(x: c.x - R * 1.15, y: c.y - R * 1.15, width: R * 2.3, height: R * 2.3)
-                let h = box.height / 7
-                for i in 0..<7 {
-                    let dy = 4 * sin(f.flagPhase + Double(i) * 0.7)
-                    layer.fill(Path(CGRect(x: box.minX, y: box.minY + Double(i) * h + dy, width: box.width, height: h + 1)), with: .color(i % 2 == 0 ? usRed : .white))
-                }
-                let canton = CGRect(x: box.minX, y: box.minY + 4 * sin(f.flagPhase), width: box.width * 0.5, height: h * 4)
-                layer.fill(Path(canton), with: .color(usBlue))
-                for row in 0..<3 {
-                    for col in 0..<4 {
-                        let p = CGPoint(x: canton.minX + canton.width * (0.2 + 0.2 * Double(col)) + R * 0.12, y: canton.minY + canton.height * (0.25 + 0.25 * Double(row)))
-                        layer.fill(Path(ellipseIn: CGRect(x: p.x - 3, y: p.y - 3, width: 6, height: 6)), with: .color(.white))
-                    }
-                }
+                FlagPainter.paint(lang.flag, in: &layer, rect: box, phase: f.flagPhase, angle: f.flagAngle, wave: 4 * Double(diameter / 320))
             }
-        }
-        // Korean style: white body, turning red/blue taegeuk, four bar marks
-        if f.ko > 0.01 {
-            gc.drawLayer { layer in
-                layer.opacity = f.ko
-                layer.fill(body, with: .color(.white))
-                layer.stroke(body, with: .color(Theme.selected), lineWidth: 1.5)
-                let r = R * 0.5
-                var t = layer
-                t.translateBy(x: c.x, y: c.y)
-                t.rotate(by: .radians(f.taegeukAngle))
-                t.fill(Path(ellipseIn: CGRect(x: -r, y: -r, width: 2 * r, height: 2 * r)), with: .color(krBlue))
-                var top = Path()
-                top.addArc(center: .zero, radius: r, startAngle: .degrees(180), endAngle: .degrees(360), clockwise: false)
-                top.closeSubpath()
-                t.fill(top, with: .color(krRed))
-                t.fill(Path(ellipseIn: CGRect(x: -r, y: -r / 2, width: r, height: r)), with: .color(krRed))
-                t.fill(Path(ellipseIn: CGRect(x: 0, y: -r / 2, width: r, height: r)), with: .color(krBlue))
-                // trigram-like bar groups at the four diagonals
-                for k in 0..<4 {
-                    var b = layer
-                    b.translateBy(x: c.x, y: c.y)
-                    b.rotate(by: .degrees(45 + Double(k) * 90))
-                    for j in 0..<3 {
-                        b.fill(Path(roundedRect: CGRect(x: R * 0.68 + Double(j) * 7, y: -11, width: 4, height: 22), cornerRadius: 1), with: .color(Color(white: 0.12)))
-                    }
-                }
-            }
+            if case .korea = lang.flag { gc.stroke(body, with: .color(Theme.selected.opacity(f.flag)), lineWidth: 1.5) }
         }
         // Highlight
         gc.drawLayer { layer in
@@ -188,15 +146,16 @@ struct OrbView: View {
 final class OrbDriver {
     struct Frame {
         var scale = 1.0, amp = 0.0, glow = 0.22, bodyOpacity = 0.92, rings = 0.0
-        var angular = 0.0, dots = 0.0, grey = 0.0, rippleAlpha = 0.0, hold = 0.0, en = 0.0, ko = 0.0
-        var rotation = 0.0, wobblePhase = 0.0, holdAngle = 0.0, flagPhase = 0.0, taegeukAngle = 0.0
+        var angular = 0.0, dots = 0.0, grey = 0.0, rippleAlpha = 0.0, hold = 0.0, flag = 0.0
+        var flagLang: Lang?
+        var rotation = 0.0, wobblePhase = 0.0, holdAngle = 0.0, flagPhase = 0.0, flagAngle = 0.0
         var ripples: [Double] = []
     }
 
     private var last: Double?
     private var cur = Frame()
     private var v: Double = 0
-    private var rotation = 0.0, wobble = 0.0, holdAngle = 0.0, flagPhase = 0.0, taegeuk = -0.5
+    private var rotation = 0.0, wobble = 0.0, holdAngle = 0.0, flagPhase = 0.0, flagAngle = -0.5
     private var rippleStarts: [Double] = []
     private var lastRipple = 0.0
     private(set) var settled = false
@@ -237,8 +196,8 @@ final class OrbDriver {
             goal.amp = reduce ? 0 : (lang == nil ? 0.015 + 0.06 * v : 0.01 + 0.03 * v)
             goal.glow = 0.45; goal.bodyOpacity = 1
             goal.rippleAlpha = 1
-            goal.en = lang == .en ? 1 : 0
-            goal.ko = lang == .ko ? 1 : 0
+            goal.flag = lang == nil ? 0 : 1
+            if let lang { cur.flagLang = lang }
         case .disabled:
             goal.scale = 0.96; goal.glow = 0; goal.bodyOpacity = 1; goal.grey = 1
         }
@@ -249,15 +208,17 @@ final class OrbDriver {
         ease(&cur.bodyOpacity, goal.bodyOpacity); ease(&cur.rings, goal.rings)
         ease(&cur.angular, goal.angular); ease(&cur.dots, goal.dots); ease(&cur.grey, goal.grey)
         ease(&cur.rippleAlpha, goal.rippleAlpha); ease(&cur.hold, goal.hold)
-        ease(&cur.en, goal.en); ease(&cur.ko, goal.ko)
+        ease(&cur.flag, goal.flag)
         settled = mode == .disabled && abs(cur.grey - 1) < 0.01 && abs(cur.scale - 0.96) < 0.002
 
         if !reduce {
             if mode == .processing { rotation += dt * 2 * .pi / 2.4 }
             if mode != .disabled && mode != .holding { wobble += dt * 1.6 }
             if mode == .holding { holdAngle += dt * 2 * .pi / 3.0 }
-            if speakingLang == .some(.en) { flagPhase += dt * 2 * .pi / 1.2 }   // waving stripes
-            if speakingLang == .some(.ko) { taegeuk += dt * 2 * .pi / 6.0 }     // turning taegeuk
+            if case .some(.some(let l)) = speakingLang {
+                if case .korea = l.flag { flagAngle += dt * 2 * .pi / 6.0 }      // turning taegeuk
+                else { flagPhase += dt * 2 * .pi / 1.2; flagAngle += dt * 2 * .pi / 8.0 } // waving bands
+            }
             if isSpeaking, v > 0.05, t - lastRipple > 0.6 { rippleStarts.append(t); lastRipple = t }
         }
         rippleStarts.removeAll { t - $0 > 1.4 }
@@ -265,7 +226,7 @@ final class OrbDriver {
         cur.wobblePhase = wobble
         cur.holdAngle = holdAngle
         cur.flagPhase = flagPhase
-        cur.taegeukAngle = taegeuk
+        cur.flagAngle = flagAngle
         cur.ripples = rippleStarts.map { (t - $0) / 1.4 }
         return cur
     }

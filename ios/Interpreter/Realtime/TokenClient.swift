@@ -60,14 +60,14 @@ final class TokenClient {
     }
 
     /// Hands-free GPT-Live: sends the phone's WebRTC offer, returns OpenAI's answer (server creates the session).
-    func liveAnswer(offer: String) async throws -> String {
+    func liveAnswer(offer: String, languages: [Lang]) async throws -> String {
         guard let baseURL else { throw TicketError.notConfigured }
         var req = URLRequest(url: baseURL.appendingPathComponent("api/live"))
         req.httpMethod = "POST"
         req.timeoutInterval = 12
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let appKey { req.setValue(appKey, forHTTPHeaderField: "X-App-Key") }
-        req.httpBody = try JSONSerialization.data(withJSONObject: ["sdp": offer])
+        req.httpBody = try JSONSerialization.data(withJSONObject: ["sdp": offer, "languages": languages.map(\.rawValue)])
         let data: Data
         let resp: URLResponse
         do { (data, resp) = try await URLSession.shared.data(for: req) } catch { throw TicketError.network(error.localizedDescription) }
@@ -77,6 +77,19 @@ final class TokenClient {
             throw TicketError.server(code, obj?["error"] as? String ?? "unknown")
         }
         return sdp
+    }
+
+    /// Languages the deployed server accepts. Throws if the server doesn't have the endpoint yet.
+    func languages() async throws -> [Lang] {
+        guard let baseURL else { throw TicketError.notConfigured }
+        var req = URLRequest(url: baseURL.appendingPathComponent("api/languages"))
+        req.timeoutInterval = 6
+        if let appKey { req.setValue(appKey, forHTTPHeaderField: "X-App-Key") }
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        guard (resp as? HTTPURLResponse)?.statusCode == 200,
+              let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let list = obj["languages"] as? [[String: Any]] else { throw TicketError.server((resp as? HTTPURLResponse)?.statusCode ?? 0, "no language list") }
+        return list.compactMap { ($0["code"] as? String).flatMap(Lang.init(rawValue:)) }
     }
 
     /// Development builds only: send latency numbers (never speech content) to the server log.

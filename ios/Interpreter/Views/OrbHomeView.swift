@@ -8,6 +8,73 @@ struct OrbHomeView: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
+        Group {
+            if controller.mode == .auto { autoBody } else { manualBody }
+        }
+        .background(Theme.background.ignoresSafeArea())
+        .sheet(isPresented: $showSettings) {
+            SettingsSheet(controller: controller).presentationCornerRadius(24)
+        }
+        .sheet(isPresented: $showHistory) {
+            HistorySheet(controller: controller)
+                .presentationDetents([.fraction(0.75), .large])
+                .presentationCornerRadius(24)
+        }
+    }
+
+    // MARK: Hands-free: face-to-face split screen
+
+    /// Top half = the other person (rotated so they can read it), bottom half = you, orb in the middle.
+    private var autoBody: some View {
+        VStack(spacing: 10) {
+            SideHalf(controller: controller, side: .them, cue: cue(for: .them))
+                .rotationEffect(.degrees(180))
+            VStack(spacing: 2) {
+                OrbView(mode: orbMode, inputLevel: controller.level, outputLevel: controller.outputLevel,
+                        accessibilityText: "\(status.title). \(status.sub)", diameter: 190)
+                    .frame(height: 170)
+                    .onTapGesture { if controller.phase == .playing || controller.autoState == .speaking { controller.stopPlayback() } }
+                Text(status.title).font(.noto(16, .bold)).foregroundStyle(Theme.text)
+                Text("\(controller.leftLang.name) ↔ \(controller.rightLang.name)").font(.noto(12, .medium)).foregroundStyle(Theme.textSecondary)
+                    .accessibilityLabel("\(controller.leftLang.name) and \(controller.rightLang.name), both directions")
+                statusAccessory.padding(.top, 4)
+            }
+            .animation(.easeInOut(duration: 0.2), value: status.title)
+            SideHalf(controller: controller, side: .me, cue: cue(for: .me))
+            HStack(spacing: 10) {
+                circleButton("clock", "History") { showHistory = true }
+                autoControls
+                circleButton("slider.horizontal.3", "Settings") { showSettings = true }
+            }
+            Text("Nothing is saved · Audio goes to OpenAI to interpret")
+                .font(.noto(11, .regular)).foregroundStyle(Theme.textSecondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
+        .padding(.bottom, 4)
+    }
+
+    /// Turn cue per half, from real state: who is talking (source transcript), who should listen (output
+    /// language while NUA plays), and whose turn it looks like next. Unknown → neutral.
+    private func cue(for side: InterpreterController.Side) -> SideHalf.Cue {
+        switch controller.autoState {
+        case .off, .connecting: return .idle
+        case .muted: return .muted
+        case .speaking:
+            guard let listener = controller.side(of: controller.speakingLanguage) else { return .idle }
+            return side == listener ? .listen : .waitOther
+        case .waiting, .hearing, .interpreting:
+            if let speaker = controller.speakerSide, controller.autoState != .waiting || controller.liveHolding {
+                return side == speaker ? .talking : .waitOther
+            }
+            if let turn = controller.turnSide { return side == turn ? .yourTurn : .idle }
+            return .idle
+        }
+    }
+
+    // MARK: Push-to-talk layout (unchanged)
+
+    private var manualBody: some View {
         VStack(spacing: 0) {
             topBar
             if controller.isLocalTest {
@@ -37,15 +104,6 @@ struct OrbHomeView: View {
             bottom
         }
         .padding(.horizontal, 16)
-        .background(Theme.background.ignoresSafeArea())
-        .sheet(isPresented: $showSettings) {
-            SettingsSheet(controller: controller).presentationCornerRadius(24)
-        }
-        .sheet(isPresented: $showHistory) {
-            HistorySheet(controller: controller)
-                .presentationDetents([.fraction(0.75), .large])
-                .presentationCornerRadius(24)
-        }
     }
 
     // MARK: 상태

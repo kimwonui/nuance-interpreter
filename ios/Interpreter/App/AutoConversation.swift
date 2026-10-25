@@ -7,9 +7,9 @@ import os
 /// How the direction is decided (checked against the API on 2026-10-24):
 /// - gpt-realtime-translate has one output language per session and no detected-language event, so
 ///   two sessions run side by side (→English and →Korean) on the same mic audio.
-/// - The →English session also returns the source transcript (gpt-4o-mini-transcribe, enabled from the
-///   client). Hangul vs. Latin letters in that text picks the direction; the other session's output is
-///   dropped. (Relying on "same-language input stays silent" alone failed: the →English session
+/// - One session also returns the source transcript (gpt-4o-mini-transcribe, enabled from the client).
+///   Apple's language recognizer, limited to the two chosen languages, picks the direction; the other
+///   session's output is dropped. (Relying on "same-language input stays silent" alone failed: the →English session
 ///   sometimes repeated English input.)
 /// - Fallback if no transcript arrives: Korean input left the →Korean session silent in testing, so a
 ///   →Korean session that produced speech means the input was English.
@@ -76,8 +76,8 @@ final class AutoConversation {
     var isOn: Bool { state != .off }
     private var now: Double { CFAbsoluteTimeGetCurrent() }
     private func other(_ l: Lang) -> Lang { l == pair.0 ? pair.1 : pair.0 }
-    /// The session that also carries the source transcript (any one would do; →English is used).
-    private var transcriptTarget: Lang { pair.0 == .en ? pair.0 : pair.1 }
+    /// The session that also carries the source transcript (any one would do).
+    private var transcriptTarget: Lang { pair.0 }
 
     // MARK: Control
 
@@ -205,7 +205,7 @@ final class AutoConversation {
         case .inputText(let d):
             guard u != nil else { return }
             u?.transcript += d
-            if u?.detected == nil, let lang = Self.language(of: u?.transcript ?? "") { decide(lang, by: "transcript") }
+            if u?.detected == nil, let lang = Lang.detect(u?.transcript ?? "", among: pair) { decide(lang, by: "transcript") }
         case .outputText(let d):
             guard u != nil else { return }
             u?.text[target, default: ""] += d
@@ -274,7 +274,7 @@ final class AutoConversation {
         var turn = Turn(source: lang, target: target)
         turn.status = .translating
         turn.targetText = cur.text[target] ?? ""
-        if Self.language(of: cur.transcript) == lang { turn.sourceText = cur.transcript.trimmingCharacters(in: .whitespacesAndNewlines) }
+        if Lang.detect(cur.transcript, among: pair) == lang { turn.sourceText = cur.transcript.trimmingCharacters(in: .whitespacesAndNewlines) }
         turn.metrics.tTap = cur.tStart
         turn.metrics.tStop = cur.tLastVoice
         cur.turnID = turn.id
@@ -286,10 +286,16 @@ final class AutoConversation {
 
     private func fallbackDecide() {
         guard let cur = u, cur.detected == nil, cur.tEnd != nil else { return }
-        if cur.voiced.contains(.ko) {
-            decide(.en, by: "fallback")
-        } else if cur.voiced.contains(.en) {
-            decide(.ko, by: "fallback")
+        // The session that produced speech is the translation; its output language is the target.
+        let a = cur.voiced.contains(pair.0), b = cur.voiced.contains(pair.1)
+        if a && b {
+            // Both talked (one may have repeated the input): the longer output is the translation.
+            let la = cur.out[pair.0]?.count ?? 0, lb = cur.out[pair.1]?.count ?? 0
+            decide(la >= lb ? pair.1 : pair.0, by: "fallback")
+        } else if a {
+            decide(pair.1, by: "fallback")
+        } else if b {
+            decide(pair.0, by: "fallback")
         } else {
             // Nothing came back (very short reply, noise, or the model is still waiting for context).
             report?(["mode": "auto:empty", "speechSec": cur.tLastVoice - cur.tStart, "route": "sent \(String(format: "%.1f", Double(cur.sentChunks) / 10))s x2"])
@@ -369,19 +375,5 @@ final class AutoConversation {
         guard total > 0 else { return 0 }
         let common = ga.reduce(0) { $0 + min($1.value, gb[$1.key] ?? 0) }
         return 2 * Double(common) / Double(total)
-    }
-
-    /// Korean if the text is mostly Hangul, English if mostly Latin letters, nil if too little to tell.
-    static func language(of text: String) -> Lang? {
-        var hangul = 0, latin = 0
-        for s in text.unicodeScalars {
-            switch s.value {
-            case 0xAC00...0xD7A3, 0x1100...0x11FF, 0x3130...0x318F: hangul += 1
-            case 65...90, 97...122: latin += 1
-            default: break
-            }
-        }
-        if hangul == 0 && latin < 2 { return nil }
-        return hangul * 2 >= latin ? .ko : .en // one Hangul syllable ≈ 2–3 Latin letters
     }
 }

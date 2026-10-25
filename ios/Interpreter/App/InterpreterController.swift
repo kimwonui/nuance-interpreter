@@ -30,8 +30,22 @@ final class InterpreterController: ObservableObject {
 
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var turns: [Turn] = []
-    @Published var leftLang: Lang = .ko
-    @Published var rightLang: Lang = .en
+    /// Face-to-face layout: leftLang = MY language (bottom half), rightLang = THEIR language (top half).
+    /// Sides are fixed by this choice; speaking the other language never flips who sits where.
+    @Published var leftLang: Lang = Lang(rawValue: UserDefaults.standard.string(forKey: "myLang") ?? "") ?? .ko {
+        didSet { UserDefaults.standard.set(leftLang.rawValue, forKey: "myLang") }
+    }
+    @Published var rightLang: Lang = Lang(rawValue: UserDefaults.standard.string(forKey: "theirLang") ?? "") ?? .en {
+        didSet { UserDefaults.standard.set(rightLang.rawValue, forKey: "theirLang") }
+    }
+    enum Side { case me, them }
+    /// Languages the deployed server accepts (GET /api/languages); Korean/English only if it can't be read.
+    @Published private(set) var availableLangs: [Lang] = [.ko, .en]
+    /// Guidance only: whose turn it looks like (the person who just heard a translation answers next).
+    @Published private(set) var turnSide: Side?
+    /// Who is talking right now, from the source transcript's language (nil = unknown).
+    @Published private(set) var speakerSide: Side?
+    func side(of lang: Lang?) -> Side? { lang == leftLang ? .me : lang == rightLang ? .them : nil }
     @Published private(set) var mic: Mic = .undetermined
     @Published private(set) var route = "iPhone speaker"
     @Published private(set) var level: Float = 0
@@ -108,9 +122,20 @@ final class InterpreterController: ObservableObject {
         audio.onInterruption = { [weak self] began in if began { self?.handleInterruptionBegan() } }
         autoEngine = AutoConversation(audio: audio) { [unowned self] target in try await self.makeSocket(target) }
         autoEngine.onState = { [weak self] s in self?.autoState = s }
-        autoEngine.onNewTurn = { [weak self] t in self?.turns.append(t) }
+        autoEngine.onNewTurn = { [weak self] t in
+            guard let self else { return }
+            self.turns.append(t)
+            self.speakerSide = self.side(of: t.source)
+        }
         autoEngine.onUpdateTurn = { [weak self] id, body in self?.update(id, body) }
-        autoEngine.onPlaying = { [weak self] id in self?.playingTurnID = id }
+        autoEngine.onPlaying = { [weak self] id in
+            guard let self else { return }
+            if id == nil, self.playingTurnID != nil, let t = self.turns.last {
+                self.turnSide = self.side(of: t.target) // the listener answers next
+                self.speakerSide = nil
+            }
+            self.playingTurnID = id
+        }
         autoEngine.onError = { [weak self] msg in self?.connectionError = msg; self?.stopConversation() }
         autoEngine.report = { [weak self] m in
             guard let self else { return }
@@ -203,6 +228,8 @@ final class InterpreterController: ObservableObject {
             connectionError = nil
             engineNote = nil
             autoState = .connecting
+            turnSide = nil
+            speakerSide = nil
             liveInput = ""
             liveSessionTurnID = nil
             liveStarted = false
@@ -221,7 +248,7 @@ final class InterpreterController: ObservableObject {
             }
             s.start { [weak self] offer in
                 guard let self else { throw CancellationError() }
-                return try await self.tokens.liveAnswer(offer: offer)
+                return try await self.tokens.liveAnswer(offer: offer, languages: [self.leftLang, self.rightLang])
             }
         }
     }
@@ -238,10 +265,13 @@ final class InterpreterController: ObservableObject {
             if liveSessionTurnID != nil, now - liveLastOut > 1.5 { liveSessionTurnID = nil; liveInput = "" }
             liveInput += d
             if let id = liveSessionTurnID { update(id) { $0.sourceText += d } }
+            if let lang = Lang.detect(liveInput, among: (leftLang, rightLang)) { speakerSide = side(of: lang); turnSide = speakerSide }
         case .outputText(let d):
             if liveSessionTurnID == nil || now - liveLastOut > 1.5 {
-                let src = AutoConversation.language(of: liveInput) ?? AutoConversation.language(of: d).map { $0 == .ko ? .en : .ko } ?? .ko
-                var t = Turn(source: src, target: src == .ko ? .en : .ko)
+                let pair = (leftLang, rightLang)
+                let other: (Lang) -> Lang = { $0 == pair.0 ? pair.1 : pair.0 }
+                let src = Lang.detect(liveInput, among: pair) ?? Lang.detect(d, among: pair).map(other) ?? pair.0
+                var t = Turn(source: src, target: other(src))
                 t.status = .playing
                 t.sourceText = liveInput.trimmingCharacters(in: .whitespacesAndNewlines)
                 t.metrics.tStop = liveLastLoudIn
@@ -253,8 +283,8 @@ final class InterpreterController: ObservableObject {
             if let id = liveSessionTurnID {
                 update(id) { $0.targetText += d }
                 // Fix the direction once the output text shows its language.
-                if let t = turns.first(where: { $0.id == id }), let outLang = AutoConversation.language(of: t.targetText), outLang != t.target {
-                    update(id) { $0.target = outLang; $0.source = outLang == .ko ? .en : .ko }
+                if let t = turns.first(where: { $0.id == id }), let outLang = Lang.detect(t.targetText, among: (leftLang, rightLang)), outLang != t.target {
+                    update(id) { $0.target = outLang; $0.source = outLang == self.leftLang ? self.rightLang : self.leftLang }
                 }
             }
         case .closed(let usage):
@@ -298,6 +328,10 @@ final class InterpreterController: ObservableObject {
                 tokens.report(["mode": "live", "direction": dir, "endToFirstSound": gap, "route": AudioIO.routeName()])
             }
         }
+        if !speakingNow && liveOutputOn, let t = turns.last {
+            turnSide = side(of: Lang.detect(t.targetText, among: (leftLang, rightLang))) // the listener answers next
+            speakerSide = nil
+        }
         liveOutputOn = speakingNow
         guard liveStarted, autoState != .muted else { return }
         if speakingNow {
@@ -316,8 +350,31 @@ final class InterpreterController: ObservableObject {
     var speakingLanguage: Lang? {
         guard let id = playingTurnID ?? (autoState == .speaking ? turns.last?.id : nil),
               let t = turns.first(where: { $0.id == id }) else { return nil }
-        if live != nil { return AutoConversation.language(of: t.targetText) }
+        if live != nil { return Lang.detect(t.targetText, among: (leftLang, rightLang)) }
         return t.target
+    }
+
+    /// Reads the languages the deployed server accepts. If unavailable (older server), only Korean/English.
+    func loadLanguages() async {
+        let langs = (try? await tokens.languages()) ?? [.ko, .en]
+        availableLangs = langs.isEmpty ? [.ko, .en] : langs
+        if !availableLangs.contains(leftLang) || !availableLangs.contains(rightLang) || leftLang == rightLang {
+            leftLang = .ko
+            rightLang = .en
+        }
+    }
+
+    /// Set a side's language (only while not running). Picking the other side's language swaps them.
+    func setLanguage(_ lang: Lang, for side: Side) {
+        guard autoState == .off, phase == .idle, availableLangs.contains(lang) else { return }
+        switch side {
+        case .me:
+            if lang == rightLang { rightLang = leftLang }
+            leftLang = lang
+        case .them:
+            if lang == leftLang { leftLang = rightLang }
+            rightLang = lang
+        }
     }
 
     // MARK: 시작·종료
@@ -326,6 +383,7 @@ final class InterpreterController: ObservableObject {
     /// 마이크 권한 요청은 처음 말하기 버튼을 누를 때 한다.
     func start() async {
         active = true
+        Task { await loadLanguages() }
         mic = await Self.micPermission(request: false)
         // The mic is never opened at launch. Push-to-talk prewarms its sessions (no audio is sent);
         // hands-free opens everything only when Start is tapped.

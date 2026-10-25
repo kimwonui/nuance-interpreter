@@ -5,8 +5,8 @@ export const MODEL = 'gpt-realtime-translate';
 export const TRANSCRIBE_MODEL = 'gpt-realtime-whisper';
 export const TRANSLATE_WS_URL = `wss://api.openai.com/v1/realtime/translations?model=${MODEL}`;
 
-// 출력 언어. 엔진은 13개 출력 언어를 지원하지만 1차는 한국어·영어만 연다.
-export const SUPPORTED_TARGETS = new Set(['ko', 'en']);
+// Output languages documented for gpt-realtime-translate (13). Same list as LANGUAGES in lib/live.mjs.
+export const SUPPORTED_TARGETS = new Set(['en', 'ko', 'ja', 'zh', 'es', 'fr', 'de', 'it', 'pt', 'ru', 'hi', 'id', 'vi']);
 
 // Source-language captions (gpt-realtime-whisper) are off by default: on low usage tiers they
 // trigger tokens/rate_limit_exceeded and block the next sessions. Set TRANSCRIBE=1 to enable.
