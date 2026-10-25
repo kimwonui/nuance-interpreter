@@ -359,20 +359,38 @@ if controller.mode == .manual {
         }
     }
 
+    /// One side of the Two-way / One-way switch: the selected side is filled with NUA's coral (white text), the other
+    /// stays neutral.
+    private func directionSegment(_ title: String, _ value: InterpreterController.Direction, hint: String) -> some View {
+        let selected = controller.direction == value
+        return Button { controller.setDirection(value) } label: {
+            Text(title)
+                .font(.noto(15, .bold))
+                .foregroundStyle(selected ? Color.white : Theme.textSecondary)
+                .frame(maxWidth: .infinity, minHeight: 40)
+                .background(Capsule().fill(selected ? AnyShapeStyle(Theme.gradient(scheme)) : AnyShapeStyle(Color.clear)))
+        }
+        .buttonStyle(.plain)
+        .animation(.easeInOut(duration: 0.15), value: selected)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityHint(hint)
+    }
+
     /// Hands-free controls. Stopped: Two-way / One-way switch (the orb starts). Running: Mute and Stop, always
     /// visible; the switch is hidden so a running session's direction can't change under it.
     @ViewBuilder
     private var autoControls: some View {
         if controller.autoState == .off {
             VStack(spacing: 4) {
-                Picker("Direction", selection: Binding(get: { controller.direction }, set: { controller.setDirection($0) })) {
-                    Text("Two-way").tag(InterpreterController.Direction.twoWay)
-                    Text("One-way").tag(InterpreterController.Direction.oneWay)
+                HStack(spacing: 4) {
+                    directionSegment("Two-way", .twoWay, hint: "Both languages are interpreted")
+                    directionSegment("One-way", .oneWay, hint: "Only your language is interpreted")
+                        .disabled(!controller.oneWayAvailable)
+                        .opacity(controller.oneWayAvailable ? 1 : 0.45)
                 }
-                .pickerStyle(.segmented)
-                .disabled(!controller.oneWayAvailable)
-                .frame(minHeight: 40)
-                .accessibilityHint(controller.direction == .oneWay ? "Only your language is interpreted" : "Both languages are interpreted")
+                .padding(4)
+                .background(Capsule().fill(Theme.surfaceRaised))
+                .shadow(color: .black.opacity(0.1), radius: 8, y: 2)
                 Text(controller.oneWayAvailable
                      ? (controller.direction == .oneWay ? "Only your language is interpreted · Tap the orb to start" : "Both languages · Tap the orb to start")
                      : "One-way needs the NUA server update · Tap the orb to start")
