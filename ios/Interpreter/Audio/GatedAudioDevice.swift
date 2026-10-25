@@ -85,7 +85,7 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     /// Notification sounds, synthesized once. Mixed into NUA's own output (so Apple's echo canceller removes them
     /// from the mic) while the model gets silence and the speech detector ignores the mic (so a chime can never
     /// count as someone speaking or cut NUA off). That window is only the chime itself + 50 ms of echo decay
-    /// (≈ 0.21 s for the turn ding): people start talking ~0.3 s or more after hearing a cue, so their first
+    /// (≈ 0.27 s for the turn chime): people start talking ~0.3 s or more after hearing a cue, so their first
     /// words arrive after it. The muted window is not replayed to the model afterwards, because it contains the
     /// chime itself.
     enum Chime { case start, yourTurn }
@@ -101,9 +101,9 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         }
         return out
     }
-    /// Start: two rising notes. Your turn (NUA finished speaking a translation): one short soft ding.
+    /// Start: two rising notes. Your turn (NUA finished speaking a translation): a quick two-note "ti-ring".
     private static let startChime = tones([(1046.5, 0), (1568.0, 0.09)], length: 0.3, amp: 0.16)
-    private static let yourTurnChime = tones([(1318.5, 0)], length: 0.16, amp: 0.12)
+    private static let yourTurnChime = tones([(1318.5, 0), (1760.0, 0.06)], length: 0.22, amp: 0.12)
     private var chime: [Float] = []
     private var chimePos = 0
     /// Ding when NUA finishes speaking a translation, so the other person knows it's their turn (two-way only;
