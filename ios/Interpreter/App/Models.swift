@@ -1,11 +1,11 @@
 import Foundation
 import NaturalLanguage
 
-/// Interpretation languages: the 13 output languages OpenAI documents for gpt-realtime-translate.
+/// Interpretation languages: the 13 output languages OpenAI documents for gpt-realtime-translate, plus Arabic.
 /// OpenAI publishes no language list for gpt-live-1; only Korean↔English has been tried, the rest are
 /// experimental. The app shows only the languages the deployed server returns (GET /api/languages).
 enum Lang: String, CaseIterable, Identifiable, Codable {
-    case en, ko, ja, zh, es, fr, de, it, pt, ru, hi, id, vi
+    case en, ko, ja, zh, es, fr, de, it, pt, ru, hi, id, vi, ar
 
     var id: String { rawValue }
     var code: String { rawValue.uppercased() }
@@ -24,6 +24,7 @@ enum Lang: String, CaseIterable, Identifiable, Codable {
         case .hi: return "Hindi"
         case .id: return "Indonesian"
         case .vi: return "Vietnamese"
+        case .ar: return "Arabic"
         }
     }
     /// The language's own name (for search and display next to the English name).
@@ -42,6 +43,7 @@ enum Lang: String, CaseIterable, Identifiable, Codable {
         case .hi: return "हिन्दी"
         case .id: return "Bahasa Indonesia"
         case .vi: return "Tiếng Việt"
+        case .ar: return "العربية"
         }
     }
 
@@ -61,6 +63,9 @@ enum Lang: String, CaseIterable, Identifiable, Codable {
     var waitingHint: String { "Other side speaking" }
     /// Only these have been tried with GPT-Live.
     var tried: Bool { self == .ko || self == .en }
+    /// GPT-Live only: gpt-realtime-translate (push to talk and the backup engine) can hear Arabic but has no
+    /// Arabic output voice, so a pair with one of these never runs on that model.
+    var liveOnly: Bool { self == .ar }
 
     var nlLanguage: NLLanguage {
         switch self {
@@ -77,6 +82,7 @@ enum Lang: String, CaseIterable, Identifiable, Codable {
         case .hi: return .hindi
         case .id: return .indonesian
         case .vi: return .vietnamese
+        case .ar: return .arabic
         }
     }
 
@@ -97,6 +103,8 @@ enum Lang: String, CaseIterable, Identifiable, Codable {
         case .ru: return .stripes(vertical: false, bands: [(0xFFFFFF, 1), (0x0039A6, 1), (0xD52B1E, 1)], emblem: nil)
         case .hi: return .stripes(vertical: false, bands: [(0xFF9933, 1), (0xFFFFFF, 1), (0x138808, 1)], emblem: .ring(0x000080, 0.16))
         case .id: return .stripes(vertical: false, bands: [(0xFF0000, 1), (0xFFFFFF, 1)], emblem: nil)
+        // Spoken across many countries: a plain pan-Arab green with a white disc, not one country's flag.
+        case .ar: return .stripes(vertical: false, bands: [(0x007A3D, 1)], emblem: .disc(0xFFFFFF, 0.18))
         }
     }
 
@@ -111,6 +119,19 @@ enum Lang: String, CaseIterable, Identifiable, Codable {
         let a = hyp[pair.0.nlLanguage] ?? 0, b = hyp[pair.1.nlLanguage] ?? 0
         guard max(a, b) >= 0.6 else { return nil }
         return a >= b ? pair.0 : pair.1
+    }
+}
+
+extension String {
+    /// True when the first letter is in a right-to-left script (Arabic, Hebrew), so captions lay out RTL.
+    var startsRightToLeft: Bool {
+        for u in unicodeScalars where u.properties.isAlphabetic {
+            switch u.value {
+            case 0x0590...0x08FF, 0xFB1D...0xFDFF, 0xFE70...0xFEFF: return true
+            default: return false
+            }
+        }
+        return false
     }
 }
 

@@ -46,6 +46,16 @@ final class InterpreterController: ObservableObject {
     /// Who is talking right now, from the source transcript's language (nil = unknown).
     @Published private(set) var speakerSide: Side?
     func side(of lang: Lang?) -> Side? { lang == leftLang ? .me : lang == rightLang ? .them : nil }
+    /// The chosen pair includes a language the interpreter model can't speak (Arabic): GPT-Live only.
+    var pairNeedsLive: Bool { leftLang.liveOnly || rightLang.liveOnly }
+    private var liveOnlyName: String { (leftLang.liveOnly ? leftLang : rightLang).name }
+    /// Why the current settings can't run the chosen pair (shown instead of starting), or nil.
+    var engineLimit: String? {
+        guard pairNeedsLive else { return nil }
+        if mode == .manual { return "Push to talk can't speak \(liveOnlyName). Use Hands-free with GPT-Live." }
+        if engine == .translate { return "\(liveOnlyName) works only with GPT-Live. Switch the hands-free engine to GPT-Live in Settings." }
+        return nil
+    }
     @Published private(set) var mic: Mic = .undetermined
     @Published private(set) var route = "iPhone speaker"
     @Published private(set) var level: Float = 0
@@ -156,6 +166,7 @@ final class InterpreterController: ObservableObject {
     func startConversation() {
         guard autoState == .off else { return }
         if engine == .live { startLive(); return }
+        guard engineLimit == nil else { return }
         startTranslateEngine()
     }
 
@@ -332,7 +343,10 @@ final class InterpreterController: ObservableObject {
             liveStarted = false
             autoState = .off
             tokens.report(["mode": "live:failed", "route": String(msg.prefix(40))])
-            if wasStarting {
+            if wasStarting && pairNeedsLive {
+                // The interpreter model has no voice for this language: say so instead of switching silently.
+                connectionError = "GPT-Live unavailable (\(msg.prefix(60))). \(liveOnlyName) works only with GPT-Live, so NUA did not switch engines."
+            } else if wasStarting {
                 // Live couldn't start (e.g. server not updated yet): fall back to the interpreter model.
                 engineNote = "GPT-Live unavailable (\(msg.prefix(60))). Using the interpreter model."
                 startTranslateEngine()
@@ -490,6 +504,7 @@ final class InterpreterController: ObservableObject {
     // MARK: 화자 버튼
 
     func tapSpeaker(_ lang: Lang) {
+        guard engineLimit == nil else { return }
         if mic != .granted || !running {
             Task {
                 mic = await Self.micPermission(request: true)
@@ -849,7 +864,7 @@ final class InterpreterController: ObservableObject {
     // MARK: 세션 준비
 
     private func prepare(_ target: Lang) {
-        guard active, !isLocalTest else { return }
+        guard active, !isLocalTest, !leftLang.liveOnly, !rightLang.liveOnly else { return }
         if let s = prepared[target], !s.isStale { return }
         prepared[target]?.cancel()
         prepared[target] = nil

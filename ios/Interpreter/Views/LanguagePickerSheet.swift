@@ -21,7 +21,7 @@ struct LanguagePickerSheet: View {
                             controller.setLanguage(lang, for: side)
                             dismiss()
                         } label: { row(lang) }
-                        .accessibilityLabel("\(lang.name), \(lang.nativeName)\(lang.tried ? "" : ", experimental")\(lang == current ? ", selected" : "")")
+                        .accessibilityLabel("\(lang.name), \(lang.nativeName)\(lang.tried ? "" : ", experimental")\(lang.liveOnly ? ", GPT-Live only" : "")\(lang == current ? ", selected" : "")")
                     }
                 } footer: {
                     Text(footnote).font(.noto(12, .regular)).foregroundStyle(Theme.textSecondary)
@@ -49,7 +49,7 @@ struct LanguagePickerSheet: View {
                     Text(lang.name).font(.noto(16, .bold)).foregroundStyle(Theme.text)
                     Text(lang.code).font(.noto(11, .bold)).foregroundStyle(Theme.textSecondary)
                 }
-                Text(lang.nativeName).font(.noto(13, .regular)).foregroundStyle(Theme.textSecondary)
+                Text(lang.liveOnly ? "\(lang.nativeName) · GPT-Live only" : lang.nativeName).font(.noto(13, .regular)).foregroundStyle(Theme.textSecondary)
             }
             Spacer()
             if lang == other {
@@ -68,7 +68,7 @@ struct LanguagePickerSheet: View {
     }
 
     private var footnote: String {
-        var text = "OpenAI does not publish a language list for GPT-Live. Only Korean and English have been tried; the others are experimental and not tested. Picking the other person's language swaps the two."
+        var text = "OpenAI does not publish a language list for GPT-Live. Only Korean and English have been tried; the others are experimental and not tested. Arabic works only with GPT-Live: the backup interpreter model can hear Arabic but can't speak it. Picking the other person's language swaps the two."
         if controller.availableLangs.count <= 2 {
             text += " More languages appear after the NUA server update is installed."
         }

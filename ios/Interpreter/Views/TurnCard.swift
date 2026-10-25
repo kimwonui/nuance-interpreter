@@ -29,6 +29,7 @@ struct TurnCard: View {
                     .font(.noto(14, .regular))
                     .foregroundStyle(Theme.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .environment(\.layoutDirection, turn.sourceText.startsRightToLeft ? .rightToLeft : .leftToRight)
             }
             if turn.status == .listening {
                 LevelWave(level: level, color: Theme.accent)
@@ -38,6 +39,7 @@ struct TurnCard: View {
                     .font(.noto(17, .bold))
                     .foregroundStyle(Theme.text)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .environment(\.layoutDirection, turn.targetText.startsRightToLeft ? .rightToLeft : .leftToRight)
                     .textSelection(.enabled)
             } else if turn.status == .translating {
                 Text("●  ●  ●").font(.noto(12, .medium)).foregroundStyle(Theme.accent)

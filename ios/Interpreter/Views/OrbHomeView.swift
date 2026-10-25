@@ -160,6 +160,14 @@ struct OrbHomeView: View {
 
     @ViewBuilder
     private var statusAccessory: some View {
+        if let limit = controller.engineLimit, controller.autoState == .off, controller.phase == .idle {
+            Text(limit)
+                .font(.noto(12, .medium))
+                .foregroundStyle(Theme.accentText)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+                .padding(.horizontal, 24)
+        }
         if let note = controller.engineNote, controller.autoState != .off {
             Text(note)
                 .font(.noto(11, .regular))
@@ -238,7 +246,7 @@ struct OrbHomeView: View {
 
     private func langMenu(_ lang: Lang, left: Bool) -> some View {
         Menu {
-            ForEach(Lang.allCases) { l in Button(l.name) { controller.setLanguage(l, left: left) } }
+            ForEach(Lang.allCases.filter { !$0.liveOnly }) { l in Button(l.name) { controller.setLanguage(l, left: left) } }
         } label: {
             HStack(spacing: 5) {
                 Text(lang.code).font(.noto(11, .bold)).foregroundStyle(Theme.accentText)
@@ -272,9 +280,11 @@ if controller.mode == .manual {
                 }
                 if !turn.sourceText.isEmpty {
                     Text(turn.sourceText).font(.noto(14, .regular)).foregroundStyle(Theme.textSecondary).lineLimit(2)
+                        .environment(\.layoutDirection, turn.sourceText.startsRightToLeft ? .rightToLeft : .leftToRight)
                 }
                 if !turn.targetText.isEmpty {
                     Text(turn.targetText).font(.noto(20, .bold)).foregroundStyle(Theme.text).lineLimit(3).minimumScaleFactor(0.8)
+                        .environment(\.layoutDirection, turn.targetText.startsRightToLeft ? .rightToLeft : .leftToRight)
                 } else if case .failed(let msg) = turn.status {
                     Text("Failed · \(msg)").font(.noto(13, .medium)).foregroundStyle(Theme.accentText).lineLimit(2)
                 } else if turn.status == .empty {
@@ -324,8 +334,8 @@ if controller.mode == .manual {
                 .shadow(color: .black.opacity(0.2), radius: 10, y: 3)
             }
             .buttonStyle(PressScale())
-            .disabled(controller.mic == .denied)
-            .accessibilityHint("Turns on the microphone and starts listening for Korean or English")
+            .disabled(controller.mic == .denied || controller.engineLimit != nil)
+            .accessibilityHint("Turns on the microphone and starts listening for \(controller.leftLang.name) or \(controller.rightLang.name)")
         } else {
             HStack(spacing: 12) {
                 Button { controller.toggleMute() } label: {
@@ -357,7 +367,7 @@ if controller.mode == .manual {
     }
 
     private func pillState(_ lang: Lang) -> SpeakerPill.State {
-        if controller.mic == .denied { return .disabled }
+        if controller.mic == .denied || controller.engineLimit != nil { return .disabled }
         switch controller.phase {
         case .idle: return controller.connectionError != nil ? .disabled : .idle
         case .listening(let l): return l == lang ? .active : .waiting

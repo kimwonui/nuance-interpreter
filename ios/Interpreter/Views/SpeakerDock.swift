@@ -29,7 +29,7 @@ struct SpeakerDock: View {
     }
 
     private func state(for lang: Lang) -> SpeakerButton.State {
-        if controller.connectionError != nil && controller.phase == .idle { return .disabled }
+        if (controller.connectionError != nil || controller.engineLimit != nil) && controller.phase == .idle { return .disabled }
         switch controller.phase {
         case .idle: return .idle
         case .listening(let l): return l == lang ? .active : .waiting

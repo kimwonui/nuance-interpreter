@@ -23,7 +23,7 @@ struct LanguageBar: View {
 
     private func chip(_ lang: Lang, left: Bool) -> some View {
         Menu {
-            ForEach(Lang.allCases) { l in
+            ForEach(Lang.allCases.filter { !$0.liveOnly }) { l in
                 Button(l.name) { controller.setLanguage(l, left: left) }
             }
         } label: {
