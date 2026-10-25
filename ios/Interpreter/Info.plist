@@ -19,7 +19,9 @@
 	<key>CFBundleShortVersionString</key>
 	<string>0.1.0</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>2</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>InterpreterAppKey</key>
 	<string>$(INTERPRETER_APP_KEY)</string>
 	<key>InterpreterServerURL</key>
@@ -29,6 +31,8 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>NUA never uses the camera. Its voice connection library can also carry video, so iOS requires this note; NUA does not turn video on.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>During development, NUA connects to the interpretation server on your local network.</string>
 	<key>NSMicrophoneUsageDescription</key>

@@ -1,6 +1,9 @@
 // 기본값. 실제 값은 같은 폴더 Secrets.xcconfig(깃 제외)에서 덮어쓴다.
 // 주의: xcconfig 에서 // 는 주석이라 주소는 http:/$()/ 형태로 적는다.
 APP_BUNDLE_ID = com.wonuik.interpreter.dev
+// Release (TestFlight/App Store) uses its own ID, so a TestFlight install sits next to the development app
+// on the phone instead of replacing it.
+APP_BUNDLE_ID[config=Release] = com.wonuik.nua
 DEVELOPMENT_TEAM =
 INTERPRETER_SERVER_URL =
 INTERPRETER_APP_KEY =
