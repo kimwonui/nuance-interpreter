@@ -55,18 +55,19 @@ struct OrbHomeView: View {
         if controller.mode == .auto, controller.autoState != .off {
             switch controller.autoState {
             case .connecting, .interpreting: return .processing
-            case .waiting, .hearing: return .listening   // mic is live: the orb follows the real mic level
-            case .speaking: return .speaking
+            // Mic is live: follow the real mic level; if NUA's voice is buffered for the pause, show waiting.
+            case .waiting, .hearing: return controller.liveHolding ? .holding : .listening
+            case .speaking: return .speaking(controller.speakingLanguage)
             case .muted: return .disabled
             case .off: return .idle
             }
         }
-        if controller.phase == .playing { return .speaking } // Replay
+        if controller.phase == .playing { return .speaking(controller.speakingLanguage) } // Replay
         switch controller.phase {
         case .idle: return controller.connectionError != nil ? .disabled : .idle
         case .listening: return .listening
         case .finishing: return .processing
-        case .playing: return .speaking
+        case .playing: return .speaking(controller.speakingLanguage)
         }
     }
 
@@ -76,15 +77,16 @@ struct OrbHomeView: View {
             switch controller.autoState {
             case .off:
                 if controller.connectionError != nil { return ("Not connected", "Mic off · Not listening") }
-                if controller.phase == .playing { return ("Playing", "Tap the orb to stop") }
+                if controller.phase == .playing { return ("Speaking" + (controller.speakingLanguage.map { " \($0.name)" } ?? ""), "Tap the orb to stop") }
                 return ("Ready", "Mic off · Tap Start conversation")
             case .connecting: return ("Connecting…", "Getting the interpreter ready")
-            case .waiting: return ("Listening", "Speak Korean or English")
-            case .hearing: return ("Hearing you…", "NUA interprets when you pause")
-            case .interpreting: return ("Interpreting", "Keeping the tone and intent")
+            case .waiting, .hearing:
+                if controller.liveHolding { return ("Waiting for you to finish", "NUA speaks after a short pause") }
+                return ("Listening", "Speak either language")
+            case .interpreting: return ("Interpreting", "Getting the translation ready")
             case .speaking:
-                let lang = controller.turns.last?.target.name ?? ""
-                return ("Speaking \(lang)", "Talk to cut in · Tap the orb to stop")
+                let lang = controller.speakingLanguage.map { " \($0.name)" } ?? ""
+                return ("Speaking\(lang)", "Talk to cut in · Tap the orb to stop")
             case .muted: return ("Muted", "Mic off · Tap Unmute to continue")
             }
         }
@@ -94,7 +96,7 @@ struct OrbHomeView: View {
             return ("Ready", controller.turns.isEmpty ? "Mic off · Tap your language to speak" : "Mic off · Tap the caption to replay")
         case .listening(let l): return ("Listening · \(l.name)", "Tap Done when you finish")
         case .finishing: return ("Interpreting", "Keeping the tone and intent")
-        case .playing: return ("Playing", "Tap the orb to stop")
+        case .playing: return ("Speaking" + (controller.speakingLanguage.map { " \($0.name)" } ?? ""), "Tap the orb to stop")
         }
     }
 
@@ -147,6 +149,16 @@ struct OrbHomeView: View {
         HStack {
             circleButton("clock", "History") { showHistory = true }
             Spacer()
+            if controller.mode == .auto {
+                // Hands-free is always both ways: a fixed label, no direction to pick or swap.
+                Text("Korean ↔ English")
+                    .font(.noto(14, .bold))
+                    .foregroundStyle(Theme.text)
+                    .padding(.horizontal, 16)
+                    .frame(height: 40)
+                    .background(Theme.surface, in: Capsule())
+                    .accessibilityLabel("Korean and English, both directions, detected automatically")
+            } else {
             HStack(spacing: 10) {
                 langMenu(controller.leftLang, left: true)
                 Button { controller.swapLanguages() } label: {
@@ -159,6 +171,7 @@ struct OrbHomeView: View {
             .frame(height: 40)
             .background(Theme.surface, in: Capsule())
             .disabled(controller.phase != .idle || controller.autoState != .off)
+            }
             Spacer()
             circleButton("slider.horizontal.3", "Settings") { showSettings = true }
         }
@@ -193,10 +206,12 @@ struct OrbHomeView: View {
         let turn = controller.turns.last
         return VStack(spacing: 6) {
             if let turn {
-                Text("\(turn.source.code) → \(turn.target.code)")
+if controller.mode == .manual {
+                                    Text("\(turn.source.code) → \(turn.target.code)")
                     .font(.noto(11, .medium)).foregroundStyle(Theme.accentText)
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .background(Theme.badge, in: RoundedRectangle(cornerRadius: 9))
+                }
                 if !turn.sourceText.isEmpty {
                     Text(turn.sourceText).font(.noto(14, .regular)).foregroundStyle(Theme.textSecondary).lineLimit(2)
                 }

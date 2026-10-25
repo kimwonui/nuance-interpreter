@@ -21,6 +21,9 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
     var onLevels: ((Float, Float) -> Void)?
     /// Seconds from the user's last speech to the first released NUA audio of a turn.
     var onRelease: ((Double) -> Void)?
+    /// true while NUA's voice is buffered and waiting for the user's pause (real gate state, not a timer).
+    var onHoldChange: ((Bool) -> Void)?
+    private var holdingReported = false
 
     private weak var adm: RTCAudioDeviceDelegate?
     private let engine = AVAudioEngine()
@@ -256,10 +259,15 @@ final class GatedAudioDevice: NSObject, RTCAudioDevice {
         } else {
             for i in 0..<count { dst[i] = 0 }
         }
+        let holdingNow = !releasing && !ring.isEmpty
         os_unfair_lock_unlock(&lock)
         if count < n { for i in count..<n { dst[i] = 0 } }
 
         if let released { onRelease?(released) }
+        if holdingNow != holdingReported {
+            holdingReported = holdingNow
+            onHoldChange?(holdingNow)
+        }
         if now - levelTick > 0.1 {
             levelTick = now
             onLevels?(lastMic, sqrt(outSum / Float(max(count, 1))))

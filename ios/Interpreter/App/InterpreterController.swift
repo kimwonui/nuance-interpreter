@@ -56,6 +56,8 @@ final class InterpreterController: ObservableObject {
         }
     }
     @Published private(set) var engineNote: String?
+    /// NUA's translated voice is buffered, waiting for the speaker's 0.5 s pause (from the audio gate).
+    @Published private(set) var liveHolding = false
     /// GPT-Live: hold NUA's voice until the speaker has paused for 0.5 s (app-enforced; see GatedAudioDevice).
     @Published var waitForPause: Bool = UserDefaults.standard.object(forKey: "liveWaitForPause") as? Bool ?? true {
         didSet {
@@ -151,6 +153,7 @@ final class InterpreterController: ObservableObject {
         if let live {
             live.stop()
             self.live = nil
+            liveHolding = false
             liveStarted = false
             autoState = .off
             playingTurnID = nil
@@ -207,6 +210,7 @@ final class InterpreterController: ObservableObject {
             live = s
             s.onEvent = { [weak self] e in self?.liveEvent(e) }
             s.onLevels = { [weak self] i, o in self?.liveLevels(i, o) }
+            s.onHoldChange = { [weak self] h in self?.liveHolding = h }
             s.onRelease = { [weak self] dt in
                 guard let self else { return }
                 let dir = self.turns.last.map { "\($0.source.code)→\($0.target.code)" } ?? "?"
@@ -304,6 +308,16 @@ final class InterpreterController: ObservableObject {
             if let id = liveSessionTurnID, now - liveLastOut > 1.5 { update(id) { if $0.status == .playing { $0.status = .done } } }
             autoState = input > 0.03 ? .hearing : .waiting
         }
+    }
+
+    /// Language NUA is speaking right now, only when certain:
+    /// interpreter-model / push-to-talk turns know their target; GPT-Live turns need the translation text to prove it.
+    /// nil → the orb shows a neutral "Speaking".
+    var speakingLanguage: Lang? {
+        guard let id = playingTurnID ?? (autoState == .speaking ? turns.last?.id : nil),
+              let t = turns.first(where: { $0.id == id }) else { return nil }
+        if live != nil { return AutoConversation.language(of: t.targetText) }
+        return t.target
     }
 
     // MARK: 시작·종료
