@@ -32,6 +32,7 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIRequiresFullScreen: true
         NSMicrophoneUsageDescription: NUA uses the microphone to interpret what you say. Audio is not saved.
+        ITSAppUsesNonExemptEncryption: false
         NSLocalNetworkUsageDescription: During development, NUA connects to the interpretation server on your local network.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
